@@ -147,3 +147,11 @@ td:first-child, th:first-child { text-align: left; color: #cfd6e8; }
 .hud.deploy .begin { display: block; }
 @keyframes bob { to { transform: translateX(-50%) translateY(-4px); } }
 #game { touch-action: none; }
+
+.touchpad { display: none; position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+
+.touchpad .stick { position: absolute; left: 18px; bottom: 22px; width: 150px; height: 150px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.35); pointer-events: auto; touch-action: none; display: grid; place-items: center; }
+.touchpad .stick i { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.45); }
+.touchpad .tbtns { position: absolute; right: 18px; bottom: 22px; display: grid; grid-template-columns: repeat(2, 78px); gap: 10px; pointer-events: auto; }
+.touchpad .tbtns button { height: 64px; border-radius: 14px; border: 2px solid rgba(255,255,255,.45); background: rgba(0,0,0,.4); color: #fff; font-weight: 800; touch-action: none; }
+.touchpad .tbtns #tFire { background: rgba(220,60,50,.6); grid-column: span 2; height: 84px; font-size: 18px; }

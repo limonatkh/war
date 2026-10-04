@@ -83,7 +83,7 @@ export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, la
             <div><h4>Commander</h4>
               <p><b>WASD / arrows</b> pan · <b>Q / E</b> rotate · <b>wheel</b> zoom · <b>click / drag</b> select · <b>Ctrl+A</b> all</p>
               <p><b>Right-click</b> smart order (capture / defend a point, attack, or move) · <b>Z</b> Move · <b>X</b> Attack · <b>C</b> Capture · <b>V</b> Defend · <b>B</b> Hold · <b>N</b> Retreat</p>
-              <p><b>Touch:</b> drag = pan · pinch = zoom · tap unit = select · tap ground = smart order · <b>1–4</b> buy reinforcements · <b>Shift+1/2/3</b> select battalion Alpha (infantry) / Bravo (heavy+ranged) / Charlie (scouts) · <b>F</b> take control of the selected soldier · <b>Space</b> begin battle · <b>P</b> pause · <b>M</b> mute</p></div>
+              <p><b>Touch:</b> (commander) drag = pan · pinch = zoom · tap unit = select · tap ground = smart order · (soldier) left stick moves, drag to look, FIRE/JUMP buttons · <b>1–4</b> buy reinforcements · <b>Shift+1/2/3</b> select battalion Alpha (infantry) / Bravo (heavy+ranged) / Charlie (scouts) · <b>F</b> take control of the selected soldier · <b>Space</b> begin battle · <b>P</b> pause · <b>M</b> mute</p></div>
             <div><h4>Soldier (first person)</h4>
               <p><b>WASD</b> move · <b>Mouse</b> aim · <b>Click</b> fire · <b>Space</b> jump · <b>Shift</b> sprint · <b>R</b> reload</p>
               <p><b>Tab</b> back to command view (commander) · <b>Esc</b> pause</p>

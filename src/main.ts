@@ -35,6 +35,10 @@ class App {
   private keys = new Set<string>();
   private mouseDown = false;
   private reloadQueued = false;
+  private touchEl: HTMLElement | null = null;
+  private tMove = { f: 0, r: 0, sprint: false };
+  private tFire = false;
+  private tJump = false;
   private armed: OrderType | null = null;
   private selection = new Set<number>();
   private drag: { x: number; y: number; active: boolean } | null = null;
@@ -70,6 +74,8 @@ class App {
     this.view?.dispose();
     this.pauseEl?.remove();
     this.pauseEl = null;
+    this.touchEl?.remove();
+    this.touchEl = null;
     document.querySelectorAll('.screen').forEach((n) => n.remove());
     this.canvas?.remove();
     this.exitLock();
@@ -82,6 +88,7 @@ class App {
     document.body.insertBefore(c, ui);
     c.addEventListener('mousedown', (e) => this.onMouseDown(e));
     this.bindTouch(c);
+    this.bindTouchPad();
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('wheel', (e) => { e.preventDefault(); if (this.view.mode === 'commander') this.view.cmd.zoom(e.deltaY); }, { passive: false });
     return c;
@@ -138,6 +145,7 @@ class App {
 
   private frame = (t: number) => {
     this.raf = requestAnimationFrame(this.frame);
+    if (this.touchEl) this.touchEl.style.display = this.view.mode === "fpp" && !this.paused && !this.ended ? "block" : "none";
     const dt = Math.min(0.05, (t - this.last) / 1000);
     this.last = t;
     const b = this.battle;
@@ -194,8 +202,10 @@ class App {
     inp.moveR = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     inp.yaw = this.look.yaw;
     inp.pitch = this.look.pitch;
-    inp.fire = this.mouseDown && document.pointerLockElement === this.canvas;
-    inp.jump = k.has('Space');
+    inp.fire = (this.mouseDown && document.pointerLockElement === this.canvas) || this.tFire;
+    inp.jump = k.has('Space') || this.tJump;
+    if (this.tMove.f || this.tMove.r) { inp.moveF = this.tMove.f; inp.moveR = this.tMove.r; }
+    if (this.tMove.sprint) inp.sprint = true;
     inp.sprint = k.has('ShiftLeft') || k.has('ShiftRight');
     inp.reload = this.reloadQueued || k.has('KeyR');
     return inp;
@@ -378,13 +388,65 @@ class App {
     this.hud.message(`${ORDER_LABEL[type]}${where} — ${ids.length} unit${ids.length > 1 ? 's' : ''}`, 'order');
   }
 
+  /** On-screen controls for the first-person view (touch devices only). */
+  private bindTouchPad() {
+    this.touchEl?.remove();
+    this.touchEl = null;
+    if (!('ontouchstart' in window) && !matchMedia('(pointer: coarse)').matches) return;
+    const el = document.createElement('div');
+    el.className = 'touchpad';
+    el.innerHTML = `<div class="stick" id="tStick"><i></i></div>
+      <div class="tbtns"><button id="tFire">FIRE</button><button id="tJump">JUMP</button><button id="tReload">R</button>${this.role === 'commander' ? '<button id="tBack">BACK</button>' : ''}</div>`;
+    ui.appendChild(el);
+    this.touchEl = el;
+    const q = (s: string) => el.querySelector<HTMLElement>(s)!;
+    const stick = q('#tStick'), knob = stick.querySelector('i') as HTMLElement;
+    let sid = -1, ox = 0, oy = 0;
+    const R = 55;
+    stick.addEventListener('touchstart', (e) => { e.preventDefault(); const t = e.changedTouches[0]; sid = t.identifier; ox = t.clientX; oy = t.clientY; }, { passive: false });
+    stick.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier !== sid) continue;
+        let dx = t.clientX - ox, dy = t.clientY - oy;
+        const m = Math.hypot(dx, dy);
+        if (m > R) { dx *= R / m; dy *= R / m; }
+        knob.style.transform = `translate(${dx}px, ${dy}px)`;
+        const dz = 0.15;
+        const f = -dy / R, r = dx / R;
+        this.tMove.f = Math.abs(f) < dz ? 0 : f; this.tMove.r = Math.abs(r) < dz ? 0 : r;
+        this.tMove.sprint = Math.min(1, m / R) > 0.95;
+      }
+    }, { passive: false });
+    const endStick = (e: TouchEvent) => { e.preventDefault(); sid = -1; knob.style.transform = ''; this.tMove = { f: 0, r: 0, sprint: false }; };
+    stick.addEventListener('touchend', endStick, { passive: false });
+    stick.addEventListener('touchcancel', endStick, { passive: false });
+    const hold = (id: string, on: (v: boolean) => void) => {
+      const b = q(id);
+      b.addEventListener('touchstart', (e) => { e.preventDefault(); on(true); }, { passive: false });
+      const off = (e: TouchEvent) => { e.preventDefault(); on(false); };
+      b.addEventListener('touchend', off, { passive: false });
+      b.addEventListener('touchcancel', off, { passive: false });
+    };
+    hold('#tFire', (v) => { this.tFire = v; });
+    hold('#tJump', (v) => { this.tJump = v; });
+    hold('#tReload', (v) => { if (v) this.reloadQueued = true; });
+    el.querySelector('#tBack')?.addEventListener('touchstart', (e) => { e.preventDefault(); this.leaveFpp(); }, { passive: false });
+  }
+
   /** Touch: 1 finger drag = pan, 2 fingers = pan + pinch zoom, tap = select / armed order / smart order. */
   private bindTouch(c: HTMLCanvasElement) {
     let g: { x: number; y: number; sx: number; sy: number; t: number; moved: boolean; dist: number } | null = null;
     const centre = (t: TouchList) => t.length > 1
       ? { x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2, d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) }
       : { x: t[0].clientX, y: t[0].clientY, d: 0 };
+    let lookId = -1, lx = 0, ly = 0;
     c.addEventListener('touchstart', (e) => {
+      if (this.running && !this.paused && !this.ended && this.view.mode === 'fpp') {
+        e.preventDefault();
+        const t = e.changedTouches[0]; lookId = t.identifier; lx = t.clientX; ly = t.clientY;
+        return;
+      }
       if (!this.running || this.paused || this.ended || this.view.mode !== 'commander') return;
       e.preventDefault();
       this.audio.unlock();
@@ -393,6 +455,16 @@ class App {
       if (e.touches.length > 1) g.moved = true;
     }, { passive: false });
     c.addEventListener('touchmove', (e) => {
+      if (this.view.mode === 'fpp') {
+        e.preventDefault();
+        for (const t of Array.from(e.changedTouches)) {
+          if (t.identifier !== lookId) continue;
+          this.look.yaw -= (t.clientX - lx) * 0.006;
+          this.look.pitch = Math.max(-1.45, Math.min(1.45, this.look.pitch - (t.clientY - ly) * 0.006));
+          lx = t.clientX; ly = t.clientY;
+        }
+        return;
+      }
       if (!g || this.view.mode !== 'commander') return;
       e.preventDefault();
       const p = centre(e.touches);
@@ -404,6 +476,7 @@ class App {
       g.x = p.x; g.y = p.y; g.dist = p.d;
     }, { passive: false });
     c.addEventListener('touchend', (e) => {
+      if (this.view.mode === 'fpp') { e.preventDefault(); lookId = -1; return; }
       if (!g || this.view.mode !== 'commander') return;
       e.preventDefault();
       if (e.touches.length > 0) return;
