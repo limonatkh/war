@@ -2,13 +2,14 @@ import type { Battle } from '../sim/battle';
 import { MAX_TIME, SCORE_TO_WIN } from '../sim/battle';
 import { G, MAP_H, MAP_W } from '../sim/map';
 import { UNIT_DEFS } from '../sim/units';
-import { UNIT_TYPE_IDS, type OrderType, type SlotRole, type Team, type UnitTypeId } from '../sim/types';
+import { BATTALION_NAMES, UNIT_TYPE_IDS, type OrderType, type SlotRole, type Team, type UnitTypeId } from '../sim/types';
 import { ORDER_COLORS, type GameView, type ViewMode } from '../render/view';
 
 export interface HudHandlers {
   order(type: OrderType): void;
   buy(t: UnitTypeId): void;
   select(kind: 'all' | UnitTypeId): void;
+  selectBattalion(n: number): void;
   speed(n: number): void;
   possess(): void;
   begin(): void;
@@ -70,6 +71,7 @@ export class Hud {
             <div class="sel-btns">
               <button data-sel="all">All</button>
               ${UNIT_TYPE_IDS.map((t) => `<button data-sel="${t}">${UNIT_DEFS[t].name}</button>`).join('')}
+              ${BATTALION_NAMES.map((n, i) => `<button data-bn="${i}" title="Select battalion (Shift+${i + 1})">${n}</button>`).join('')}
             </div></div>
           <div class="orders">
             ${ORDER_BTNS.map((o) => `<button data-order="${o.type}" title="${o.hint}" style="--c:${ORDER_COLORS[o.type]}"><b>${o.label}</b><kbd>${o.key}</kbd></button>`).join('')}
@@ -110,6 +112,7 @@ export class Hud {
 
     this.el.querySelectorAll<HTMLElement>('[data-order]').forEach((b) => b.addEventListener('click', () => h.order(b.dataset.order as OrderType)));
     this.el.querySelectorAll<HTMLElement>('[data-buy]').forEach((b) => b.addEventListener('click', () => h.buy(b.dataset.buy as UnitTypeId)));
+    this.el.querySelectorAll<HTMLElement>('[data-bn]').forEach((b) => b.addEventListener('click', () => h.selectBattalion(Number(b.dataset.bn))));
     this.el.querySelectorAll<HTMLElement>('[data-sel]').forEach((b) => b.addEventListener('click', () => h.select(b.dataset.sel as 'all' | UnitTypeId)));
     this.el.querySelectorAll<HTMLElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => h.speed(Number(b.dataset.speed))));
     this.q('#enter').addEventListener('click', () => h.possess());

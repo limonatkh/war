@@ -109,6 +109,7 @@ class App {
       order: (t) => this.orderButton(t),
       buy: (t) => this.buy(t),
       select: (k) => this.selectKind(k),
+      selectBattalion: (n) => this.selectBattalion(n),
       speed: (n) => { this.speed = n; },
       possess: () => this.possessSelected(),
       begin: () => this.begin(),
