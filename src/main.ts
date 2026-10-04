@@ -3,7 +3,7 @@ import { GameAudio } from './audio';
 import { GameView } from './render/view';
 import { Battle, TICK } from './sim/battle';
 import { UNIT_DEFS } from './sim/units';
-import { BLUE, TEAM_NAME, UNIT_TYPE_IDS, emptyInput, type Composition, type ControlInput, type OrderType, type SimEvent, type Team, type UnitTypeId } from './sim/types';
+import { BATTALION_NAMES, BLUE, TEAM_NAME, UNIT_TYPE_IDS, emptyInput, type Composition, type ControlInput, type OrderType, type SimEvent, type Team, type UnitTypeId } from './sim/types';
 import { Hud } from './ui/hud';
 import { PRESETS, showMenu, type MenuChoice } from './ui/menu';
 import { showResult } from './ui/result';
@@ -402,6 +402,15 @@ class App {
     }
   }
 
+  private selectBattalion(n: number) {
+    if (this.view.mode !== 'commander') return;
+    this.selection.clear();
+    for (const u of this.battle.units) {
+      if (u.alive && u.team === this.humanTeam && u.controller < 0 && u.battalion === n) this.selection.add(u.id);
+    }
+    this.hud.message(`${BATTALION_NAMES[n]} battalion selected (${this.selection.size})`, 'info');
+  }
+
   private buy(t: UnitTypeId) {
     if (this.role !== 'commander') return;
     const b = this.battle;
@@ -440,9 +449,9 @@ class App {
       case 'KeyB': this.orderButton('hold'); break;
       case 'KeyN': this.orderButton('retreat'); break;
       case 'KeyF': this.possessSelected(); break;
-      case 'Digit1': this.buy(UNIT_TYPE_IDS[0]); break;
-      case 'Digit2': this.buy(UNIT_TYPE_IDS[1]); break;
-      case 'Digit3': this.buy(UNIT_TYPE_IDS[2]); break;
+      case 'Digit1': if (e.shiftKey) this.selectBattalion(0); else this.buy(UNIT_TYPE_IDS[0]); break;
+      case 'Digit2': if (e.shiftKey) this.selectBattalion(1); else this.buy(UNIT_TYPE_IDS[1]); break;
+      case 'Digit3': if (e.shiftKey) this.selectBattalion(2); else this.buy(UNIT_TYPE_IDS[2]); break;
       case 'Digit4': this.buy(UNIT_TYPE_IDS[3]); break;
       case 'Escape':
         if (this.armed) { this.armed = null; this.canvas.style.cursor = 'default'; this.hud.hint(''); }

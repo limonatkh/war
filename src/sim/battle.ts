@@ -2,7 +2,7 @@ import { CommanderAI } from './ai';
 import { GameMap, MAP_H, MAP_W, OB, rng } from './map';
 import { UNIT_DEFS, DEFAULT_COMPOSITION } from './units';
 import {
-  BLUE, RED, enemyOf, emptyInput,
+  BATTALION_NAMES, BLUE, RED, enemyOf, emptyInput,
   type BattleResult, type Command, type Composition, type ControlPoint, type ControlInput, type Order,
   type OrderType, type Phase, type PlayerSlot, type SimEvent, type SlotRole, type Structure, type Team,
   type TeamState, type Unit, type UnitDef, type UnitStats, type UnitTypeId,
@@ -31,6 +31,8 @@ export interface BattleConfig {
   /** Strength of the AI commander facing the human. */
   difficulty?: 'easy' | 'normal' | 'hard';
 }
+
+const BATTALION_OF: Record<UnitTypeId, number> = { infantry: 0, heavy: 1, ranged: 1, scout: 2 };
 
 const newStats = (): UnitStats => ({ kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, damage: 0 });
 
@@ -84,7 +86,7 @@ export class Battle {
       const human = this.humanTeam === team && humanRole === 'commander';
       this.slots.push({
         id: team, team, role: 'commander', human, name: human ? 'You' : 'AI Commander',
-        unitId: -1, respawnT: 0, soldierType: 'infantry', stats: newStats(),
+        unitId: -1, respawnT: 0, soldierType: 'infantry', stats: newStats(), battalion: -1,
       });
       if (!human) this.ais[team] = new CommanderAI(team, this.rand() * 1000, this.humanTeam !== -1 && team !== this.humanTeam ? ({ easy: 2, normal: 1, hard: 0.6 })[cfg.difficulty ?? 'normal'] : 1);
     }
@@ -92,7 +94,7 @@ export class Battle {
       this.humanSlotId = 2;
       this.slots.push({
         id: 2, team: this.humanTeam, role: 'soldier', human: true, name: 'You',
-        unitId: -1, respawnT: 0, soldierType: cfg.soldierType ?? 'infantry', stats: newStats(),
+        unitId: -1, respawnT: 0, soldierType: cfg.soldierType ?? 'infantry', stats: newStats(), battalion: -1,
       });
     } else if (this.humanTeam !== -1) {
       this.humanSlotId = this.humanTeam;
@@ -148,6 +150,16 @@ export class Battle {
     return u && u.id === id ? u : undefined;
   }
 
+  /** Adds a Battalion Commander slot (orders limited to one battalion). Returns its slot id. Not used by the UI yet. */
+  addBattalionCommander(team: Team, battalion: number, human = false): number {
+    const id = this.slots.length;
+    this.slots.push({
+      id, team, role: 'commander', human, name: `${BATTALION_NAMES[battalion] ?? 'Battalion'} Commander`,
+      unitId: -1, respawnT: 0, soldierType: 'infantry', stats: newStats(), battalion,
+    });
+    return id;
+  }
+
   alive(team: Team): Unit[] { return this.units.filter((u) => u.team === team && u.alive); }
 
   canSee(team: Team, u: Unit): boolean { return u.team === team || this.visible[team].has(u.id); }
@@ -170,7 +182,7 @@ export class Battle {
     const y = this.map.terrainAt(spot.x, spot.z);
     const faceYaw = team === BLUE ? 0 : Math.PI; // blue faces north (-z), red faces south
     const u: Unit = {
-      id: this.nextId++, team, type, x: spot.x, y, z: spot.z, px: spot.x, py: y, pz: spot.z,
+      id: this.nextId++, battalion: BATTALION_OF[type], team, type, x: spot.x, y, z: spot.z, px: spot.x, py: y, pz: spot.z,
       yaw: faceYaw, pyaw: faceYaw, pitch: 0, vy: 0, grounded: true,
       hp: def.hp, maxHp: def.hp, alive: true, deadAt: 0, order: null, controller: -1, input: emptyInput(),
       cooldown: 0, ammo: def.mag, reloadT: 0, targetId: -1, retargetT: this.rand() * 0.4, lastDamagedAt: -99,
@@ -212,7 +224,7 @@ export class Battle {
         case 'order': this.issueOrder(c.slotId, c.unitIds, c.order); break;
         case 'buy': {
           const slot = this.slots[c.slotId];
-          if (slot && slot.role === 'commander') this.spawnUnit(slot.team, c.unitType);
+          if (slot && slot.role === 'commander' && slot.battalion < 0) this.spawnUnit(slot.team, c.unitType);
           break;
         }
         case 'possess': {
@@ -244,6 +256,7 @@ export class Battle {
     for (const id of unitIds) {
       const u = this.unitById(id);
       if (!u || !u.alive || u.team !== slot.team) continue;
+      if (slot.battalion >= 0 && u.battalion !== slot.battalion) continue; // battalion commanders only command their own battalion
       let radius = o.radius ?? defaults[o.type];
       let x = o.x, z = o.z;
       if (o.type === 'capture') {

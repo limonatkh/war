@@ -19,7 +19,7 @@ const manual = () => {
 /** Adds a slot (id === index) whose controlled unit just stands still: a frozen dummy. */
 const freeze = (b: Battle, u: { controller: number; stats: object; team: 0 | 1 }) => {
   const id = b.slots.length;
-  b.slots.push({ id, team: u.team, role: 'soldier', human: false, name: 'dummy', unitId: -1, respawnT: 0, soldierType: 'infantry', stats: { kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, damage: 0 } });
+  b.slots.push({ id, team: u.team, role: 'soldier', human: false, name: 'dummy', unitId: -1, respawnT: 0, soldierType: 'infantry', stats: { kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, damage: 0 }, battalion: -1 });
   u.controller = id;
 };
 const killAll = (b: Battle, team: 0 | 1) => { for (const u of b.units) if (u.team === team) { u.alive = false; u.hp = 0; } };
@@ -275,5 +275,25 @@ describe('full AI battle', { timeout: 120000 }, () => {
     console.log('big army wins', big, 'small army wins', small);
     expect(big + small).toBeGreaterThan(0);
     expect(big).toBeGreaterThanOrEqual(small);
+  });
+});
+
+describe('battalions', () => {
+  it('a battalion commander can only order its own battalion and cannot buy', () => {
+    const b = new Battle({ seed: 3, humanTeam: -1, deploy: true });
+    const slot = b.addBattalionCommander(0, 2); // Charlie = scouts
+    const mine = b.alive(0);
+    const scout = mine.find((u) => u.type === 'scout')!;
+    const inf = mine.find((u) => u.type === 'infantry')!;
+    expect(scout.battalion).toBe(2);
+    expect(inf.battalion).toBe(0);
+    b.submit({ kind: 'order', slotId: slot, unitIds: [scout.id, inf.id], order: { type: 'move', x: 32, z: 40 } });
+    b.step();
+    expect(scout.order).not.toBeNull();
+    expect(inf.order).toBeNull();
+    const before = b.alive(0).length;
+    b.submit({ kind: 'buy', slotId: slot, unitType: 'infantry' });
+    b.step();
+    expect(b.alive(0).length).toBe(before);
   });
 });

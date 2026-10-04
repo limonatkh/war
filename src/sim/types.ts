@@ -65,8 +65,12 @@ export interface UnitStats {
   damage: number;
 }
 
+export const BATTALION_NAMES = ['Alpha', 'Bravo', 'Charlie'] as const;
+
 export interface Unit {
   id: number;
+  /** Battalion index (0..2); assigned from the unit type when it spawns. */
+  battalion: number;
   team: Team;
   type: UnitTypeId;
   x: number; y: number; z: number;
@@ -129,6 +133,8 @@ export interface PlayerSlot {
   respawnT: number; // seconds until respawn when role === 'soldier' and dead (<=0: none pending)
   soldierType: UnitTypeId;
   stats: UnitStats;
+  /** -1 = Army Commander (whole army). 0..2 = Battalion Commander (only that battalion). */
+  battalion: number;
 }
 
 export type Phase = 'deploy' | 'running' | 'ended';
