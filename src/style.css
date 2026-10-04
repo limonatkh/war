@@ -146,3 +146,4 @@ td:first-child, th:first-child { text-align: left; color: #cfd6e8; }
 .begin kbd { background: rgba(0,0,0,.15); }
 .hud.deploy .begin { display: block; }
 @keyframes bob { to { transform: translateX(-50%) translateY(-4px); } }
+#game { touch-action: none; }

@@ -38,6 +38,15 @@ export class CommanderCamera {
     this.apply();
   }
 
+  /** Drag-pan by a screen-space delta in pixels (touch). */
+  panPx(dx: number, dy: number) {
+    const k = this.dist * 0.0017;
+    const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+    const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+    this.tx = Math.max(2, Math.min(MAP_W - 2, this.tx - rx * dx * k + fx * dy * k));
+    this.tz = Math.max(2, Math.min(MAP_H - 2, this.tz - rz * dx * k + fz * dy * k));
+  }
+
   zoom(delta: number) { this.dist = Math.max(14, Math.min(72, this.dist * (1 + delta * 0.0012))); }
 
   update(dt: number, keys: Set<string>) {

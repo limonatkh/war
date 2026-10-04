@@ -81,6 +81,7 @@ class App {
     c.tabIndex = 0;
     document.body.insertBefore(c, ui);
     c.addEventListener('mousedown', (e) => this.onMouseDown(e));
+    this.bindTouch(c);
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('wheel', (e) => { e.preventDefault(); if (this.view.mode === 'commander') this.view.cmd.zoom(e.deltaY); }, { passive: false });
     return c;
@@ -375,6 +376,56 @@ class App {
     this.audio.order();
     const where = cpId >= 0 ? ` point ${this.battle.cps[cpId].name}` : '';
     this.hud.message(`${ORDER_LABEL[type]}${where} — ${ids.length} unit${ids.length > 1 ? 's' : ''}`, 'order');
+  }
+
+  /** Touch: 1 finger drag = pan, 2 fingers = pan + pinch zoom, tap = select / armed order / smart order. */
+  private bindTouch(c: HTMLCanvasElement) {
+    let g: { x: number; y: number; sx: number; sy: number; t: number; moved: boolean; dist: number } | null = null;
+    const centre = (t: TouchList) => t.length > 1
+      ? { x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2, d: Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) }
+      : { x: t[0].clientX, y: t[0].clientY, d: 0 };
+    c.addEventListener('touchstart', (e) => {
+      if (!this.running || this.paused || this.ended || this.view.mode !== 'commander') return;
+      e.preventDefault();
+      this.audio.unlock();
+      const p = centre(e.touches);
+      g = { x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), moved: false, dist: p.d };
+      if (e.touches.length > 1) g.moved = true;
+    }, { passive: false });
+    c.addEventListener('touchmove', (e) => {
+      if (!g || this.view.mode !== 'commander') return;
+      e.preventDefault();
+      const p = centre(e.touches);
+      if (Math.hypot(p.x - g.sx, p.y - g.sy) > 10) g.moved = true;
+      if (g.moved) {
+        this.view.cmd.panPx(p.x - g.x, p.y - g.y);
+        if (e.touches.length > 1 && g.dist > 0) this.view.cmd.zoom((g.dist - p.d) * 2.2);
+      }
+      g.x = p.x; g.y = p.y; g.dist = p.d;
+    }, { passive: false });
+    c.addEventListener('touchend', (e) => {
+      if (!g || this.view.mode !== 'commander') return;
+      e.preventDefault();
+      if (e.touches.length > 0) return;
+      const tap = !g.moved && performance.now() - g.t < 450;
+      const { x, y } = g;
+      g = null;
+      if (!tap || !this.running || this.paused || this.ended) return;
+      this.onTap(x, y);
+    }, { passive: false });
+  }
+
+  private onTap(x: number, y: number) {
+    if (this.armed) {
+      const p = this.view.pickGround(x, y);
+      if (p) this.issue(this.armed, p.x, p.z);
+      this.armed = null; this.canvas.style.cursor = 'default'; this.hud.hint('');
+      return;
+    }
+    const id = this.view.unitAt(x, y, true);
+    if (id !== null && this.battle.unitById(id)!.controller < 0) {
+      if (this.selection.has(id)) this.selection.delete(id); else this.selection.add(id);
+    } else if (this.selection.size) this.rightClick({ clientX: x, clientY: y } as MouseEvent); // tap ground with a selection = smart order
   }
 
   private rightClick(e: MouseEvent) {
