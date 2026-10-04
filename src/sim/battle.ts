@@ -25,6 +25,10 @@ export interface BattleConfig {
   /** Team of the human player, or -1 for an all-AI (headless) battle. */
   humanTeam?: Team | -1;
   humanRole?: SlotRole;
+  /** With humanRole 'commander': -1 = Army Commander, 0..2 = Battalion Commander of that battalion. */
+  humanBattalion?: number;
+  /** AI-run armies are commanded by three battalion AIs (plus an army AI that only buys). */
+  aiBattalions?: boolean;
   soldierType?: UnitTypeId;
   /** Start in the deploy phase (human commander gives first orders, then presses Begin). */
   deploy?: boolean;
@@ -62,13 +66,14 @@ export class Battle {
   private cmds: Command[] = [];
   private nextId = 1;
   private rand: () => number;
-  private ais: (CommanderAI | null)[] = [null, null];
+  private ais: CommanderAI[] = [];
 
   constructor(cfg: BattleConfig = {}) {
     this.rand = rng(cfg.seed ?? 1);
     this.humanTeam = cfg.humanTeam ?? -1;
     const comps = cfg.compositions ?? [DEFAULT_COMPOSITION, DEFAULT_COMPOSITION];
     const humanRole = cfg.humanRole ?? 'commander';
+    const humanBn = humanRole === 'commander' ? (cfg.humanBattalion ?? -1) : -1;
 
     this.structures = [
       { id: 0, team: BLUE, x: this.map.hq[0].x, z: this.map.hq[0].z, hp: HQ_HP, maxHp: HQ_HP, alive: true },
@@ -83,12 +88,12 @@ export class Battle {
 
     // Slots: one commander slot per army (AI-run unless it's the human), plus an optional human soldier slot.
     for (const team of [BLUE, RED] as Team[]) {
-      const human = this.humanTeam === team && humanRole === 'commander';
+      const human = this.humanTeam === team && humanRole === 'commander' && humanBn < 0;
       this.slots.push({
         id: team, team, role: 'commander', human, name: human ? 'You' : 'AI Commander',
         unitId: -1, respawnT: 0, soldierType: 'infantry', stats: newStats(), battalion: -1,
       });
-      if (!human) this.ais[team] = new CommanderAI(team, this.rand() * 1000, this.humanTeam !== -1 && team !== this.humanTeam ? ({ easy: 2, normal: 1, hard: 0.6 })[cfg.difficulty ?? 'normal'] : 1);
+      if (!human) this.ais.push(new CommanderAI(team, this.rand() * 1000, this.humanTeam !== -1 && team !== this.humanTeam ? ({ easy: 2, normal: 1, hard: 0.6 })[cfg.difficulty ?? 'normal'] : 1));
     }
     if (this.humanTeam !== -1 && humanRole === 'soldier') {
       this.humanSlotId = 2;
@@ -96,8 +101,25 @@ export class Battle {
         id: 2, team: this.humanTeam, role: 'soldier', human: true, name: 'You',
         unitId: -1, respawnT: 0, soldierType: cfg.soldierType ?? 'infantry', stats: newStats(), battalion: -1,
       });
+    } else if (this.humanTeam !== -1 && humanBn >= 0) {
+      this.humanSlotId = this.addBattalionCommander(this.humanTeam, humanBn, true);
     } else if (this.humanTeam !== -1) {
       this.humanSlotId = this.humanTeam;
+    }
+
+    // Battalion AIs: the army AI then only buys, and each battalion is run by its own AI commander.
+    for (const team of [BLUE, RED] as Team[]) {
+      const army = this.ais.find((a) => a.team === team && a.only < 0);
+      if (!army) continue; // human Army Commander
+      const lag = army.lag;
+      const humanHere = this.humanTeam === team && humanBn >= 0;
+      if (!(cfg.aiBattalions || humanHere)) continue;
+      for (let n = 0; n < BATTALION_NAMES.length; n++) {
+        army.excluded.add(n);
+        if (humanHere && n === humanBn) continue;
+        const slot = this.addBattalionCommander(team, n, false);
+        this.ais.push(new CommanderAI(team, this.rand() * 1000, lag, slot, n, false));
+      }
     }
 
     // Initial deployment
@@ -233,7 +255,7 @@ export class Battle {
           if (c.unitId < 0) this.release(slot);
           else {
             const u = this.unitById(c.unitId);
-            if (u && u.alive && u.team === slot.team && u.controller < 0) this.possess(slot, u);
+            if (u && u.alive && u.team === slot.team && u.controller < 0 && (slot.battalion < 0 || u.battalion === slot.battalion)) this.possess(slot, u);
           }
           break;
         }

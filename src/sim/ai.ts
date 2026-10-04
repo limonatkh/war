@@ -21,7 +21,18 @@ export class CommanderAI {
   private seen = new Map<number, { x: number; z: number; t: number }>();
   private buyCycle = 0;
 
-  constructor(readonly team: Team, private readonly seed: number, private readonly lag = 1) {}
+  /** Battalions this (army-level) AI leaves to someone else (a human or a battalion AI). */
+  readonly excluded = new Set<number>();
+
+  /**
+   * @param slotId  slot whose id orders are issued under (the army slot, or a battalion slot)
+   * @param only    -1 = army-level AI; 0..2 = battalion AI that commands only that battalion
+   * @param buys    whether this AI spends supplies (army-level only)
+   */
+  constructor(
+    readonly team: Team, private readonly seed: number, readonly lag = 1,
+    readonly slotId: number = team, readonly only = -1, private readonly buys = true,
+  ) {}
 
   update(b: Battle, dt: number) {
     this.timer -= dt;
@@ -46,10 +57,10 @@ export class CommanderAI {
       if (!e || !e.alive || b.time - s.t > 12) this.seen.delete(id);
     }
 
-    this.buy(b);
+    if (this.buys) this.buy(b);
 
     const all = b.alive(team);
-    const mine = all.filter((u) => u.controller < 0);
+    const mine = all.filter((u) => u.controller < 0 && (this.only < 0 ? !this.excluded.has(u.battalion) : u.battalion === this.only));
     if (!mine.length) return;
 
     const myHp = all.reduce((n, u) => n + u.hp, 0);
@@ -66,6 +77,7 @@ export class CommanderAI {
     // ---- home guard
     let guardN = threats > 0 ? Math.min(mine.length, threats + 2) : (ratio > 1.8 ? 1 : 2);
     if (ratio < 0.45) guardN = Math.max(guardN, Math.ceil(mine.length * 0.6));
+    if (this.only >= 0) guardN = Math.ceil(guardN / 2); // a battalion only supplies part of the home guard
     const guards = mine.filter((u) => u.type !== 'scout').sort((a, c) => dist(a, ownHq.x, ownHq.z) - dist(c, ownHq.x, ownHq.z)).slice(0, guardN);
     for (const u of guards) assign(u, { type: 'defend', x: homePoint.x, z: homePoint.z, cpId: -1, radius: 9 });
 
@@ -138,7 +150,7 @@ export class CommanderAI {
     }
     for (const g of groups.values()) {
       b.submit({
-        kind: 'order', slotId: team, unitIds: g.ids,
+        kind: 'order', slotId: this.slotId, unitIds: g.ids,
         order: { type: g.plan.type, x: g.plan.x, z: g.plan.z, cpId: g.plan.cpId, radius: g.plan.radius },
       });
     }

@@ -1,5 +1,5 @@
 import { DEFAULT_BUDGET, DEFAULT_COMPOSITION, UNIT_DEFS, compositionCost, compositionCount } from '../sim/units';
-import { UNIT_TYPE_IDS, type Composition, type SlotRole, type Team, type UnitTypeId } from '../sim/types';
+import { BATTALION_NAMES, UNIT_TYPE_IDS, type Composition, type SlotRole, type Team, type UnitTypeId } from '../sim/types';
 
 export interface MenuChoice {
   team: Team;
@@ -7,6 +7,8 @@ export interface MenuChoice {
   soldierType: UnitTypeId;
   composition: Composition;
   difficulty: 'easy' | 'normal' | 'hard';
+  /** -1 = Army Commander; 0..2 = Battalion Commander (only with role 'commander'). */
+  battalion: number;
 }
 
 export const PRESETS: { name: string; comp: Composition; blurb: string }[] = [
@@ -18,7 +20,7 @@ export const PRESETS: { name: string; comp: Composition; blurb: string }[] = [
 
 export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, last?: MenuChoice) {
   const state: MenuChoice = last ? { ...last, composition: { ...last.composition } } : {
-    team: 0, role: 'commander', soldierType: 'infantry', composition: { ...DEFAULT_COMPOSITION }, difficulty: 'normal',
+    team: 0, role: 'commander', soldierType: 'infantry', composition: { ...DEFAULT_COMPOSITION }, difficulty: 'normal', battalion: -1,
   };
 
   const el = document.createElement('div');
@@ -42,15 +44,21 @@ export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, la
 
         <h3>2 · Choose your role</h3>
         <div class="row">
-          <button class="choice role ${state.role === 'commander' ? 'on' : ''}" data-role="commander">
+          <button class="choice role ${state.role === 'commander' && state.battalion < 0 ? 'on' : ''}" data-role="commander">
             <b>Army Commander</b><span>Top-down view. Select units, give orders, spend supplies. You may also jump into any soldier.</span>
+          </button>
+          <button class="choice role ${state.role === 'commander' && state.battalion >= 0 ? 'on' : ''}" data-role="battalion">
+            <b>Battalion Commander</b><span>Command one battalion (Alpha infantry, Bravo heavy+ranged, Charlie scouts). An AI Army Commander and AI battalion commanders run the rest.</span>
           </button>
           <button class="choice role ${state.role === 'soldier' ? 'on' : ''}" data-role="soldier">
             <b>Soldier</b><span>First-person fighter. Follow your AI commander's orders — or ignore them and risk losing.</span>
           </button>
         </div>
 
-        ${state.role === 'soldier' ? `
+        ${state.role === 'commander' && state.battalion >= 0 ? `
+          <h3>Your battalion</h3>
+          <div class="row wrap">${BATTALION_NAMES.map((n, i) => `<button class="chip ${state.battalion === i ? 'on' : ''}" data-bn="${i}"><b>${n}</b><span>${['Infantry', 'Heavy + Ranged', 'Scouts'][i]}</span></button>`).join('')}</div>` : ''}
+        ${state.role === 'soldier' || state.battalion >= 0 ? `
           <h3>Your unit</h3>
           <div class="row wrap">
             ${UNIT_TYPE_IDS.map((t) => `<button class="chip ${state.soldierType === t ? 'on' : ''}" data-soldier="${t}"><b>${UNIT_DEFS[t].name}</b><span>${UNIT_DEFS[t].hp} HP · ${UNIT_DEFS[t].damage} dmg · range ${UNIT_DEFS[t].range}</span></button>`).join('')}
@@ -74,7 +82,7 @@ export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, la
         <div class="row wrap">${(['easy', 'normal', 'hard'] as const).map((d) => `<button class="chip ${state.difficulty === d ? 'on' : ''}" data-diff="${d}"><b>${d[0].toUpperCase() + d.slice(1)}</b></button>`).join('')}</div>
 
         <div class="row end">
-          <button id="start" class="primary" ${state.role === 'commander' && (left < 0 || count === 0) ? 'disabled' : ''}>Start battle</button>
+          <button id="start" class="primary" ${state.role === 'commander' && state.battalion < 0 && (left < 0 || count === 0) ? 'disabled' : ''}>Start battle</button>
         </div>
 
         <details>
@@ -94,7 +102,13 @@ export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, la
 
     el.querySelectorAll<HTMLElement>('[data-team]').forEach((b) => b.addEventListener('click', () => { state.team = Number(b.dataset.team) as Team; render(); }));
     el.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { state.difficulty = b.dataset.diff as MenuChoice['difficulty']; render(); }));
-    el.querySelectorAll<HTMLElement>('[data-role]').forEach((b) => b.addEventListener('click', () => { state.role = b.dataset.role as SlotRole; render(); }));
+    el.querySelectorAll<HTMLElement>('[data-role]').forEach((b) => b.addEventListener('click', () => {
+      const r = b.dataset.role!;
+      if (r === 'battalion') { state.role = 'commander'; if (state.battalion < 0) state.battalion = 0; }
+      else { state.role = r as SlotRole; state.battalion = -1; }
+      render();
+    }));
+    el.querySelectorAll<HTMLElement>('[data-bn]').forEach((b) => b.addEventListener('click', () => { state.battalion = Number(b.dataset.bn); render(); }));
     el.querySelectorAll<HTMLElement>('[data-soldier]').forEach((b) => b.addEventListener('click', () => { state.soldierType = b.dataset.soldier as UnitTypeId; render(); }));
     el.querySelectorAll<HTMLElement>('[data-preset]').forEach((b) => b.addEventListener('click', () => { state.composition = { ...PRESETS[Number(b.dataset.preset)].comp }; render(); }));
     el.querySelectorAll<HTMLElement>('[data-inc]').forEach((b) => b.addEventListener('click', () => {

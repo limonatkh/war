@@ -297,3 +297,31 @@ describe('battalions', () => {
     expect(b.alive(0).length).toBe(before);
   });
 });
+
+describe('battalion AI and human battalion commander', () => {
+  it('battalion AIs command their own battalions and the army AI only buys', () => {
+    const b = new Battle({ seed: 5, humanTeam: -1, aiBattalions: true });
+    const bnSlots = b.slots.filter((s) => s.battalion >= 0);
+    expect(bnSlots.length).toBe(6);
+    for (let i = 0; i < 30 * 5; i++) b.step();
+    const moving = b.alive(0).filter((u) => u.order);
+    expect(moving.length).toBeGreaterThan(10);
+  }, 60000);
+
+  it('a battle between battalion-AI armies still ends with a result', () => {
+    const b = new Battle({ seed: 2, humanTeam: -1, aiBattalions: true });
+    for (let i = 0; i < 30 * 900 && b.phase !== 'ended'; i++) b.step();
+    expect(b.phase).toBe('ended');
+  }, 120000);
+
+  it('human battalion commander: army AI leaves that battalion alone', () => {
+    const b = new Battle({ seed: 4, humanTeam: 0, humanRole: 'commander', humanBattalion: 2, deploy: false });
+    const me = b.slots[b.humanSlotId];
+    expect(me.human && me.battalion === 2).toBe(true);
+    for (let i = 0; i < 30 * 15; i++) b.step();
+    const scouts = b.alive(0).filter((u) => u.battalion === 2);
+    expect(scouts.length).toBeGreaterThan(0);
+    expect(scouts.every((u) => u.order === null)).toBe(true); // nobody orders the human's battalion
+    expect(b.alive(0).filter((u) => u.battalion !== 2 && u.order).length).toBeGreaterThan(5); // allied AI battalions move
+  }, 60000);
+});

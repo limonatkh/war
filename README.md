@@ -18,9 +18,11 @@ npm run build
 - `src/sim` — pure deterministic TypeScript simulation (30 Hz, seeded RNG): map, units, orders, battle, commander AI. No rendering/DOM.
 - `src/render` — Three.js voxel meshes, camera, effects.
 - `src/ui` — menu, HUD, result screen. `src/audio.ts` — synthesized SFX.
-- Players are `PlayerSlot`s issuing `Command`s through `Battle.submit`, so battalion commanders (`Battle.addBattalionCommander`, sim-only for now, no UI/AI) and networking can be added later without rewriting the sim.
+- Players are `PlayerSlot`s issuing `Command`s through `Battle.submit`, so battalion commanders (`Battle.addBattalionCommander`, `aiBattalions` config for fully AI-run battalions) and networking can be added later without rewriting the sim.
 
 Menu: choose army, role, composition and enemy commander difficulty (easy/normal/hard).
+
+Roles: Army Commander, **Battalion Commander** (you command Alpha/Bravo/Charlie only; an AI Army Commander buys supplies and AI battalion commanders run the other two battalions) or Soldier.
 
 ## Status / honest notes
 Verified with unit tests and headless-browser runs. Game feel, balance and real pointer-lock FPP aiming still need human playtesting. No networking yet. Roadmap: polish, battalion commanders, multiplayer, merge into Lemonat.

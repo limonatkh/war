@@ -102,13 +102,14 @@ class App {
     this.role = choice.role;
     const seed = (Math.random() * 1e9) | 0;
     const aiComp: Composition = { ...PRESETS[seed % PRESETS.length].comp };
-    const mine: Composition = choice.role === 'commander' ? choice.composition : { ...PRESETS[0].comp };
+    const mine: Composition = choice.role === 'commander' && choice.battalion < 0 ? choice.composition : { ...PRESETS[0].comp };
     const comps: [Composition, Composition] = choice.team === 0 ? [mine, aiComp] : [aiComp, mine];
     this.battle = new Battle({
-      seed, compositions: comps, humanTeam: choice.team, humanRole: choice.role,
+      seed, compositions: comps, humanTeam: choice.team, humanRole: choice.role, humanBattalion: choice.battalion,
       soldierType: choice.soldierType, deploy: choice.role === 'commander', difficulty: choice.difficulty,
     });
     this.slotId = this.battle.humanSlotId;
+    document.body.classList.toggle('bn-mode', this.battle.slots[this.slotId].battalion >= 0);
     this.canvas = this.newCanvas();
     this.view = new GameView(this.canvas, this.battle, this.humanTeam);
     this.selection = new Set();
@@ -361,8 +362,14 @@ class App {
 
   // ------------------------------------------------------------------ commander actions
 
+  /** Units the human may select/command: the whole army, or just their battalion. */
+  private isMine(u: { team: number; battalion: number; controller: number; alive: boolean }): boolean {
+    const bn = this.battle.slots[this.slotId]?.battalion ?? -1;
+    return u.alive && u.team === this.humanTeam && u.controller < 0 && (bn < 0 || u.battalion === bn);
+  }
+
   private ownIds(): number[] {
-    return [...this.selection].filter((id) => { const u = this.battle.unitById(id); return u && u.alive && u.controller < 0 && u.team === this.humanTeam; });
+    return [...this.selection].filter((id) => { const u = this.battle.unitById(id); return u && this.isMine(u); });
   }
 
   private orderButton(type: OrderType) {
@@ -496,7 +503,7 @@ class App {
       return;
     }
     const id = this.view.unitAt(x, y, true);
-    if (id !== null && this.battle.unitById(id)!.controller < 0) {
+    if (id !== null && this.isMine(this.battle.unitById(id)!)) {
       if (this.selection.has(id)) this.selection.delete(id); else this.selection.add(id);
     } else if (this.selection.size) this.rightClick({ clientX: x, clientY: y } as MouseEvent); // tap ground with a selection = smart order
   }
@@ -523,7 +530,7 @@ class App {
     if (this.view.mode !== 'commander') return;
     this.selection.clear();
     for (const u of this.battle.units) {
-      if (u.alive && u.team === this.humanTeam && u.controller < 0 && (kind === 'all' || u.type === kind)) this.selection.add(u.id);
+      if (this.isMine(u) && (kind === 'all' || u.type === kind)) this.selection.add(u.id);
     }
   }
 
@@ -531,13 +538,14 @@ class App {
     if (this.view.mode !== 'commander') return;
     this.selection.clear();
     for (const u of this.battle.units) {
-      if (u.alive && u.team === this.humanTeam && u.controller < 0 && u.battalion === n) this.selection.add(u.id);
+      if (this.isMine(u) && u.battalion === n) this.selection.add(u.id);
     }
     this.hud.message(`${BATTALION_NAMES[n]} battalion selected (${this.selection.size})`, 'info');
   }
 
   private buy(t: UnitTypeId) {
     if (this.role !== 'commander') return;
+    if (this.battle.slots[this.slotId].battalion >= 0) { this.hud.message('Only the Army Commander can buy reinforcements.', 'info'); return; }
     const b = this.battle;
     const def = UNIT_DEFS[t];
     if (b.teams[this.humanTeam].supplies < def.cost) { this.hud.message(`Not enough supplies for a ${def.name} (${def.cost}).`, 'bad'); return; }
@@ -628,7 +636,7 @@ class App {
     this.hud.selBox.style.display = 'none';
     if (e.button !== 0 || this.paused) return;
     if (d.active) {
-      const ids = this.view.unitsInRect(d.x, d.y, e.clientX, e.clientY).filter((id) => this.battle.unitById(id)!.controller < 0);
+      const ids = this.view.unitsInRect(d.x, d.y, e.clientX, e.clientY).filter((id) => this.isMine(this.battle.unitById(id)!));
       if (!e.shiftKey) this.selection.clear();
       ids.forEach((id) => this.selection.add(id));
       return;
@@ -642,7 +650,7 @@ class App {
       return;
     }
     const id = this.view.unitAt(e.clientX, e.clientY, true);
-    if (id !== null && this.battle.unitById(id)!.controller < 0) {
+    if (id !== null && this.isMine(this.battle.unitById(id)!)) {
       if (e.shiftKey) { if (this.selection.has(id)) this.selection.delete(id); else this.selection.add(id); }
       else { this.selection.clear(); this.selection.add(id); }
     } else if (!e.shiftKey) this.selection.clear();
