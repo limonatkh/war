@@ -98,7 +98,7 @@ class App {
     const comps: [Composition, Composition] = choice.team === 0 ? [mine, aiComp] : [aiComp, mine];
     this.battle = new Battle({
       seed, compositions: comps, humanTeam: choice.team, humanRole: choice.role,
-      soldierType: choice.soldierType, deploy: choice.role === 'commander',
+      soldierType: choice.soldierType, deploy: choice.role === 'commander', difficulty: choice.difficulty,
     });
     this.slotId = this.battle.humanSlotId;
     this.canvas = this.newCanvas();

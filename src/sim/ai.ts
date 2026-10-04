@@ -21,12 +21,12 @@ export class CommanderAI {
   private seen = new Map<number, { x: number; z: number; t: number }>();
   private buyCycle = 0;
 
-  constructor(readonly team: Team, private readonly seed: number) {}
+  constructor(readonly team: Team, private readonly seed: number, private readonly lag = 1) {}
 
   update(b: Battle, dt: number) {
     this.timer -= dt;
     if (this.timer > 0) return;
-    this.timer = 2.6 + ((this.seed * 7.31) % 1) * 0.8;
+    this.timer = (2.6 + ((this.seed * 7.31) % 1) * 0.8) * this.lag;
     this.think(b);
   }
 
@@ -84,7 +84,7 @@ export class CommanderAI {
     let flankTarget: Plan | null = null;
     if (notMine.length === 0) {
       // we hold everything: press the advantage if stronger, otherwise just hold the centre
-      const push = ratio > 1.15;
+      const push = ratio > (this.lag > 1 ? 1.6 : 1.15);
       mainTarget = push
         ? { type: 'attack', x: enemyHq.x, z: enemyHq.z - towardEnemy * 9, cpId: -1, radius: 6 }
         : { type: 'defend', x: cps[1].x, z: cps[1].z - towardEnemy * 2, cpId: -1, radius: 8 };

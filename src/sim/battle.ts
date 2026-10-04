@@ -28,6 +28,8 @@ export interface BattleConfig {
   soldierType?: UnitTypeId;
   /** Start in the deploy phase (human commander gives first orders, then presses Begin). */
   deploy?: boolean;
+  /** Strength of the AI commander facing the human. */
+  difficulty?: 'easy' | 'normal' | 'hard';
 }
 
 const newStats = (): UnitStats => ({ kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, damage: 0 });
@@ -84,7 +86,7 @@ export class Battle {
         id: team, team, role: 'commander', human, name: human ? 'You' : 'AI Commander',
         unitId: -1, respawnT: 0, soldierType: 'infantry', stats: newStats(),
       });
-      if (!human) this.ais[team] = new CommanderAI(team, this.rand() * 1000);
+      if (!human) this.ais[team] = new CommanderAI(team, this.rand() * 1000, this.humanTeam !== -1 && team !== this.humanTeam ? ({ easy: 2, normal: 1, hard: 0.6 })[cfg.difficulty ?? 'normal'] : 1);
     }
     if (this.humanTeam !== -1 && humanRole === 'soldier') {
       this.humanSlotId = 2;

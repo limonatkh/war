@@ -6,6 +6,7 @@ export interface MenuChoice {
   role: SlotRole;
   soldierType: UnitTypeId;
   composition: Composition;
+  difficulty: 'easy' | 'normal' | 'hard';
 }
 
 export const PRESETS: { name: string; comp: Composition; blurb: string }[] = [
@@ -17,7 +18,7 @@ export const PRESETS: { name: string; comp: Composition; blurb: string }[] = [
 
 export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, last?: MenuChoice) {
   const state: MenuChoice = last ? { ...last, composition: { ...last.composition } } : {
-    team: 0, role: 'commander', soldierType: 'infantry', composition: { ...DEFAULT_COMPOSITION },
+    team: 0, role: 'commander', soldierType: 'infantry', composition: { ...DEFAULT_COMPOSITION }, difficulty: 'normal',
   };
 
   const el = document.createElement('div');
@@ -69,6 +70,9 @@ export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, la
           <div class="budget"><div style="width:${Math.min(100, (cost / DEFAULT_BUDGET) * 100)}%" class="${left < 0 ? 'over' : ''}"></div></div>
           <p class="hint">The enemy fields a similar budget. Unspent supplies are kept for reinforcements.</p>`}
 
+        <h3>Enemy commander</h3>
+        <div class="row wrap">${(['easy', 'normal', 'hard'] as const).map((d) => `<button class="chip ${state.difficulty === d ? 'on' : ''}" data-diff="${d}"><b>${d[0].toUpperCase() + d.slice(1)}</b></button>`).join('')}</div>
+
         <div class="row end">
           <button id="start" class="primary" ${state.role === 'commander' && (left < 0 || count === 0) ? 'disabled' : ''}>Start battle</button>
         </div>
@@ -89,6 +93,7 @@ export function showMenu(root: HTMLElement, onStart: (c: MenuChoice) => void, la
       </div>`;
 
     el.querySelectorAll<HTMLElement>('[data-team]').forEach((b) => b.addEventListener('click', () => { state.team = Number(b.dataset.team) as Team; render(); }));
+    el.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) => b.addEventListener('click', () => { state.difficulty = b.dataset.diff as MenuChoice['difficulty']; render(); }));
     el.querySelectorAll<HTMLElement>('[data-role]').forEach((b) => b.addEventListener('click', () => { state.role = b.dataset.role as SlotRole; render(); }));
     el.querySelectorAll<HTMLElement>('[data-soldier]').forEach((b) => b.addEventListener('click', () => { state.soldierType = b.dataset.soldier as UnitTypeId; render(); }));
     el.querySelectorAll<HTMLElement>('[data-preset]').forEach((b) => b.addEventListener('click', () => { state.composition = { ...PRESETS[Number(b.dataset.preset)].comp }; render(); }));
