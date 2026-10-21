@@ -156,3 +156,26 @@ td:first-child, th:first-child { text-align: left; color: #cfd6e8; }
 .touchpad .tbtns button { height: 64px; border-radius: 14px; border: 2px solid rgba(255,255,255,.45); background: rgba(0,0,0,.4); color: #fff; font-weight: 800; touch-action: none; }
 .touchpad .tbtns #tFire { background: rgba(220,60,50,.6); grid-column: span 2; height: 84px; font-size: 18px; }
 body.bn-mode .hud .buy { display: none; }
+
+
+/* Field command: always show the recipient, keep actions usable on touch screens. */
+.field-panel { position:absolute; top:100px; left:18px; max-width:min(430px,90vw); padding:12px; border:1px solid #536b83; border-radius:10px; background:#101b2ce8; color:#e7f1ff; pointer-events:auto; }
+.field-panel b, .field-panel small { display:block; margin:4px 0; }
+.field-squads, .field-touch-orders { display:flex; flex-wrap:wrap; gap:5px; margin:8px 0; }
+.field-panel button { font-size:12px; padding:7px; }
+.field-panel button.on { background:#326b83; border-color:#76e3dd; }
+.command-wheel { position:absolute; left:50%; top:50%; width:0; height:0; z-index:50; pointer-events:none; }
+.command-wheel[hidden] { display:none; }
+.command-wheel > div { position:absolute; width:112px; height:54px; margin:-27px -56px; transform:rotate(var(--angle)) translateY(-118px); border:1px solid #53728a; background:#101b2cf5; border-radius:12px; display:grid; place-items:center; }
+.command-wheel > div span { transform:rotate(calc(-1 * var(--angle))); font-size:13px; }
+.command-wheel > div.on { background:#27676c; border:2px solid #88fff3; box-shadow:0 0 24px #4bc1c655; }
+.command-wheel > b { position:absolute; width:110px; margin:-20px -55px; text-align:center; font-size:12px; text-shadow:0 2px 3px #000; }
+.death-setting { display:grid; gap:9px; margin:18px 0; }
+.death-setting select { background:#19293e; color:#edf5ff; padding:12px; border:1px solid #60758f; border-radius:8px; }
+@media (pointer:fine) { .field-touch-orders { display:none; } }
+@media (max-width:700px) { .field-panel { top:90px; left:8px; padding:7px; max-width:80vw; } .field-panel small { font-size:10px; } }
+/* Keep the longer setup screen reachable and field controls readable. */
+.screen.menu { align-items: flex-start; }
+.field-panel button { color: #e7f1ff; background: #22364d; border: 1px solid #59718a; border-radius: 6px; }
+.hud.mode-fpp .feed { top: 240px; }
+@media (pointer: coarse) { .hud.mode-fpp .feed { top: 300px; } }

@@ -1,5 +1,11 @@
-import type { Team } from './types';
+import type { MapId, Team } from './types';
 
+export const MAPS: { id: MapId; name: string; description: string }[] = [
+  { id: 'valley', name: 'Green Valley', description: 'Original battlefield: hill, central ruins and eastern basin.' },
+  { id: 'desert', name: 'Desert Crossroads', description: 'Open sand, rocky ridges and three wide vehicle lanes.' },
+  { id: 'town', name: 'Frontier Town', description: 'City blocks, broad avenues and sheltered flanking streets.' },
+  { id: 'forest', name: 'Pine Pass', description: 'Woodland corridors, stepped hills and open capture clearings.' },
+];
 export const MAP_W = 64;
 export const MAP_H = 64;
 
@@ -47,8 +53,9 @@ export class GameMap {
   readonly spawns: [SpawnPoint[], SpawnPoint[]] = [[], []];
   private fields = new Map<number, Float64Array>();
 
-  constructor() {
+  constructor(readonly id: MapId = 'valley') {
     this.generate();
+    if (id !== 'valley') this.generateVariant(id);
   }
 
   idx(cx: number, cz: number) { return cz * MAP_W + cx; }
@@ -69,12 +76,17 @@ export class GameMap {
     return this.heights[i] + this.obsH[i];
   }
 
-  walkable(cx: number, cz: number): boolean {
-    return this.inBounds(cx, cz) && this.obsH[this.idx(cx, cz)] === 0;
+  walkable(cx: number, cz: number, clearance = 0): boolean {
+    if (!this.inBounds(cx, cz)) return false;
+    const height = this.heights[this.idx(cx, cz)];
+    for (let z = cz - clearance; z <= cz + clearance; z++) for (let x = cx - clearance; x <= cx + clearance; x++) {
+      if (!this.inBounds(x, z) || this.obsH[this.idx(x, z)] > 0 || Math.abs(this.heights[this.idx(x, z)] - height) > 1) return false;
+    }
+    return true;
   }
 
-  canStep(ax: number, az: number, bx: number, bz: number): boolean {
-    if (!this.walkable(ax, az) || !this.walkable(bx, bz)) return false;
+  canStep(ax: number, az: number, bx: number, bz: number, clearance = 0): boolean {
+    if (!this.walkable(ax, az, clearance) || !this.walkable(bx, bz, clearance)) return false;
     return Math.abs(this.heights[this.idx(ax, az)] - this.heights[this.idx(bx, bz)]) <= 1;
   }
 
@@ -95,17 +107,17 @@ export class GameMap {
 
   // ---------------------------------------------------------------- navigation
 
-  nearestWalkable(cx: number, cz: number): [number, number] {
+  nearestWalkable(cx: number, cz: number, clearance = 0): [number, number] {
     cx = Math.max(0, Math.min(MAP_W - 1, cx));
     cz = Math.max(0, Math.min(MAP_H - 1, cz));
-    if (this.walkable(cx, cz)) return [cx, cz];
+    if (this.walkable(cx, cz, clearance)) return [cx, cz];
     for (let r = 1; r < 12; r++) {
       let best: [number, number] | null = null;
       let bd = Infinity;
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
-          if (!this.walkable(cx + dx, cz + dz)) continue;
+          if (!this.walkable(cx + dx, cz + dz, clearance)) continue;
           const d = dx * dx + dz * dz;
           if (d < bd) { bd = d; best = [cx + dx, cz + dz]; }
         }
@@ -116,9 +128,10 @@ export class GameMap {
   }
 
   /** Cost-to-goal field (Dijkstra). Shared between every unit heading to the same goal cell. */
-  field(goalX: number, goalZ: number): Float64Array {
-    const [gx, gz] = this.nearestWalkable(goalX, goalZ);
-    const key = gz * MAP_W + gx;
+  field(goalX: number, goalZ: number, clearance = 0): Float64Array {
+    const [gx, gz] = this.nearestWalkable(goalX, goalZ, clearance);
+    const goal = gz * MAP_W + gx;
+    const key = goal + clearance * MAP_W * MAP_H;
     const cached = this.fields.get(key);
     if (cached) return cached;
     const dist = new Float64Array(MAP_W * MAP_H).fill(Infinity);
@@ -155,16 +168,16 @@ export class GameMap {
       }
       return top;
     };
-    dist[key] = 0;
-    push(0, key);
+    dist[goal] = 0;
+    push(0, goal);
     while (heap.length) {
       const [c, i] = pop();
       if (c > dist[i]) continue;
       const cx = i % MAP_W, cz = (i / MAP_W) | 0;
       for (const [dx, dz, w] of DIRS) {
         const nx = cx + dx, nz = cz + dz;
-        if (!this.canStep(cx, cz, nx, nz)) continue;
-        if (dx !== 0 && dz !== 0 && (!this.canStep(cx, cz, cx + dx, cz) || !this.canStep(cx, cz, cx, cz + dz))) continue;
+        if (!this.canStep(cx, cz, nx, nz, clearance)) continue;
+        if (dx !== 0 && dz !== 0 && (!this.canStep(cx, cz, cx + dx, cz, clearance) || !this.canStep(cx, cz, cx, cz + dz, clearance))) continue;
         const ni = nz * MAP_W + nx;
         const nc = c + w;
         if (nc < dist[ni]) { dist[ni] = nc; push(nc, ni); }
@@ -176,13 +189,13 @@ export class GameMap {
   }
 
   /** Best neighbouring cell to walk to when following a field. Null when at goal or boxed in. */
-  nextCell(field: Float64Array, cx: number, cz: number): [number, number] | null {
+  nextCell(field: Float64Array, cx: number, cz: number, clearance = 0): [number, number] | null {
     let best: [number, number] | null = null;
     let bv = field[cz * MAP_W + cx];
     for (const [dx, dz] of DIRS) {
       const nx = cx + dx, nz = cz + dz;
-      if (!this.canStep(cx, cz, nx, nz)) continue;
-      if (dx !== 0 && dz !== 0 && (!this.canStep(cx, cz, cx + dx, cz) || !this.canStep(cx, cz, cx, cz + dz))) continue;
+      if (!this.canStep(cx, cz, nx, nz, clearance)) continue;
+      if (dx !== 0 && dz !== 0 && (!this.canStep(cx, cz, cx + dx, cz, clearance) || !this.canStep(cx, cz, cx, cz + dz, clearance))) continue;
       const v = field[nz * MAP_W + nx];
       if (v < bv) { bv = v; best = [nx, nz]; }
     }
@@ -190,6 +203,58 @@ export class GameMap {
   }
 
   // ---------------------------------------------------------------- generation
+
+  private generateVariant(id: MapId) {
+    // Preserve HQ ownership and spawn coordinates; rebuild terrain and all other cover.
+    for (let i = 0; i < this.obsH.length; i++) {
+      if (this.obsKind[i] !== OB.hq) { this.obsH[i] = 0; this.obsKind[i] = 0; this.obsOwner[i] = -1; }
+    }
+    this.heights.fill(1);
+    this.ground.fill(id === 'desert' ? G.sand : id === 'town' ? G.stone : G.grass);
+    for (let z = 2; z < 50; z++) for (let x = 2; x < 62; x++) {
+      if (z < 32) continue;
+      const lane = [12, 32, 52].some((c) => Math.abs(x + 0.5 - c) < 3.5);
+      const cross = Math.abs(z + 0.5 - 32) < 3 || Math.abs(z + 0.5 - 44) < 2;
+      for (const zz of [z, 63 - z]) {
+        const i = this.idx(x, zz);
+        if (lane || cross) this.ground[i] = G.road;
+        else if (id === 'forest') {
+          const hill = Math.min(Math.abs(x - 22), Math.abs(x - 42));
+          this.heights[i] = hill < 2 ? 3 : hill < 4 ? 2 : 1;
+        }
+      }
+    }
+    if (id === 'town') {
+      for (const x of [3, 19, 39, 56]) for (const z of [37, 46]) {
+        this.building(x, z, 5, 5, [[x + 2, z], [x + 2, z + 4]]);
+        this.setObs(x + 1, z + 2, 1.2, OB.crate);
+      }
+    } else if (id === 'desert') {
+      for (const x of [21, 42]) for (const z of [36, 39, 47]) {
+        for (let dx = 0; dx < 3; dx++) this.setObs(x + dx, z, 2 + dx * 0.25, OB.rock);
+      }
+      for (const x of [8, 27, 47]) this.setObs(x, 37, 1.2, OB.cover);
+    } else {
+      const rand = rng(90210);
+      for (let n = 0; n < 180; n++) {
+        const x = 2 + Math.floor(rand() * 60), z = 35 + Math.floor(rand() * 14);
+        if (this.ground[this.idx(x, z)] === G.road) continue;
+        if (this.controlPoints.some((c) => Math.hypot(x - c.x, z - c.z) < 7)) continue;
+        this.setObs(x, z, 3.4, OB.tree);
+      }
+    }
+    // Clear objectives and staging areas, always keeping symmetric approaches navigable.
+    for (let z = 0; z < MAP_H; z++) for (let x = 0; x < MAP_W; x++) {
+      const i = this.idx(x, z);
+      const staging = x >= 24 && x <= 40 && (z >= 49 || z <= 14);
+      const objective = this.controlPoints.some((c) => Math.hypot(x + 0.5 - c.x, z + 0.5 - c.z) < c.radius + 1);
+      if (staging || objective) {
+        this.heights[i] = 1;
+        if (this.obsKind[i] !== OB.hq) { this.obsH[i] = 0; this.obsKind[i] = 0; }
+      }
+      if (staging) this.ground[i] = z > 32 ? G.bluePad : G.redPad;
+    }
+  }
 
   private mirrorZ(z: number) { return MAP_H - 1 - z; }
 
@@ -318,3 +383,4 @@ export class GameMap {
     }
   }
 }
+

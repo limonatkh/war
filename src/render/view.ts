@@ -10,7 +10,7 @@ import { buildControlPoint, buildHq, buildProps, buildTerrain, type CpView, type
 export type ViewMode = 'commander' | 'fpp';
 
 export const ORDER_COLORS: Record<OrderType, string> = {
-  move: '#6be07a', attack: '#ff6b5b', defend: '#6bb7ff', hold: '#c7c7c7', retreat: '#ffb347', capture: '#ffe96b',
+  move: '#6be07a', attack: '#ff6b5b', defend: '#6bb7ff', hold: '#c7c7c7', retreat: '#ffb347', capture: '#ffe96b', follow: '#69e7df',
 };
 
 interface UnitView {
@@ -303,10 +303,10 @@ export class GameView {
       // walking animation
       const moving = u.alive && u.moving;
       if (moving) v.phase += dt * UNIT_DEFS[u.type].speed * 2.3;
-      const swing = moving ? Math.sin(v.phase) * 0.75 : 0;
+      const swing = moving && !UNIT_DEFS[u.type].vehicle ? Math.sin(v.phase) * 0.75 : 0;
       m.legL.rotation.x += (swing - m.legL.rotation.x) * Math.min(1, dt * 18);
       m.legR.rotation.x += (-swing - m.legR.rotation.x) * Math.min(1, dt * 18);
-      m.body.position.y = moving ? Math.abs(Math.sin(v.phase)) * 0.05 : 0;
+      m.body.position.y = moving && !UNIT_DEFS[u.type].vehicle ? Math.abs(Math.sin(v.phase)) * 0.05 : 0;
 
       // death animation
       if (!u.alive) {
@@ -325,7 +325,7 @@ export class GameView {
       const possessed = u.controller >= 0 && mine;
       m.marker.visible = !fpp;
       m.marker.position.y = (2.75 + Math.sin(now * 0.004 + u.id) * 0.08) * m.scale;
-      m.selRing.visible = !fpp && (sel || possessed);
+      m.selRing.visible = (sel || possessed) && u.id !== (fpp ? this.fppUnitId : -1);
       (m.selRing.material as THREE.MeshBasicMaterial).color.set(possessed ? '#58e6ff' : '#ffe96b');
       m.ring.visible = true;
       const hpFrac = u.hp / u.maxHp;
@@ -369,7 +369,7 @@ export class GameView {
     }
     const moving = u.moving && u.alive;
     this.bob += moving ? dt * def.speed * 2.6 : 0;
-    const bobY = moving ? Math.sin(this.bob * 2) * 0.025 : 0;
+    const bobY = moving && !def.vehicle ? Math.sin(this.bob * 2) * 0.025 : 0;
     this.fppCam.position.set(
       u.px + (u.x - u.px) * alpha, v.y + (u.alive ? 1.55 * def.scale + bobY : 0.4), u.pz + (u.z - u.pz) * alpha,
     );
@@ -425,3 +425,4 @@ export class GameView {
     this.lineGeo.attributes.position.needsUpdate = true;
   }
 }
+

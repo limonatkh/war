@@ -2,6 +2,16 @@ import type { Composition, UnitDef, UnitTypeId } from './types';
 
 // Four unit types, each with a clear job (kept deliberately small for the prototype).
 export const UNIT_DEFS: Record<UnitTypeId, UnitDef> = {
+  tank: {
+    id: 'tank', name: 'Tank', role: 'Armoured cannon. Strong against vehicles; slow reload.', vehicle: true,
+    cost: 55, hp: 620, speed: 2.7, damage: 95, range: 42, cooldown: 2.8, spread: 0.018,
+    mag: 1, reload: 2.8, vision: 27, scale: 1.5,
+  },
+  vehicle: {
+    id: 'vehicle', name: 'Armoured car', role: 'Fast wheeled fire support. Flanks and captures.', vehicle: true,
+    cost: 32, hp: 280, speed: 6.2, damage: 15, range: 29, cooldown: 0.22, spread: 0.045,
+    mag: 60, reload: 3, vision: 32, scale: 1.25,
+  },
   infantry: {
     id: 'infantry', name: 'Infantry', role: 'All-rounder. Backbone of the army.',
     cost: 10, hp: 100, speed: 4.2, damage: 12, range: 30, cooldown: 0.45, spread: 0.035,
@@ -26,7 +36,7 @@ export const UNIT_DEFS: Record<UnitTypeId, UnitDef> = {
 
 export const DEFAULT_BUDGET = 240;
 
-export const DEFAULT_COMPOSITION: Composition = { infantry: 10, heavy: 3, scout: 3, ranged: 3 };
+export const DEFAULT_COMPOSITION: Composition = { infantry: 6, heavy: 2, scout: 2, ranged: 2, tank: 1, vehicle: 1 };
 
 export function compositionCost(c: Composition): number {
   let total = 0;
@@ -37,3 +47,4 @@ export function compositionCost(c: Composition): number {
 export function compositionCount(c: Composition): number {
   return (Object.keys(UNIT_DEFS) as UnitTypeId[]).reduce((n, k) => n + (c[k] ?? 0), 0);
 }
+

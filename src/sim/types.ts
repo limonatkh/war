@@ -8,10 +8,14 @@ export const RED: Team = 1;
 export const enemyOf = (t: Team): Team => (t === 0 ? 1 : 0);
 export const TEAM_NAME = ['Blue', 'Red'] as const;
 
-export type UnitTypeId = 'infantry' | 'heavy' | 'scout' | 'ranged';
-export const UNIT_TYPE_IDS: UnitTypeId[] = ['infantry', 'heavy', 'scout', 'ranged'];
+export type UnitTypeId = 'infantry' | 'heavy' | 'scout' | 'ranged' | 'tank' | 'vehicle';
+export const UNIT_TYPE_IDS: UnitTypeId[] = ['infantry', 'heavy', 'scout', 'ranged', 'tank', 'vehicle'];
+
+export type DeathBehavior = 'nearest' | 'farthest' | 'commander';
+export type MapId = 'valley' | 'desert' | 'town' | 'forest';
 
 export interface UnitDef {
+  vehicle?: boolean;
   id: UnitTypeId;
   name: string;
   role: string;
@@ -28,10 +32,11 @@ export interface UnitDef {
   scale: number; // visual + hitbox scale
 }
 
-export type OrderType = 'move' | 'attack' | 'defend' | 'hold' | 'retreat' | 'capture';
+export type OrderType = 'move' | 'attack' | 'defend' | 'hold' | 'retreat' | 'capture' | 'follow';
 export const ORDER_TYPES: OrderType[] = ['move', 'attack', 'defend', 'hold', 'retreat', 'capture'];
 
 export interface Order {
+  followId?: number;
   type: OrderType;
   x: number;
   z: number;
@@ -130,7 +135,7 @@ export interface PlayerSlot {
   human: boolean;
   name: string;
   unitId: number; // possessed unit id or -1
-  respawnT: number; // seconds until respawn when role === 'soldier' and dead (<=0: none pending)
+  deathBehavior?: DeathBehavior;
   soldierType: UnitTypeId;
   stats: UnitStats;
   /** -1 = Army Commander (whole army). 0..2 = Battalion Commander (only that battalion). */
@@ -164,14 +169,15 @@ export type SimEvent =
   | { t: 'spawn'; unitId: number; team: Team }
   | { t: 'structureHit'; structureId: number; hp: number }
   | { t: 'possessLost'; slotId: number }
-  | { t: 'respawn'; slotId: number; unitId: number }
+  | { t: 'controlTransferred'; slotId: number; unitId: number }
   | { t: 'end'; result: BattleResult };
 
 export type Command =
-  | { kind: 'order'; slotId: number; unitIds: number[]; order: { type: OrderType; x: number; z: number; cpId?: number; radius?: number } }
+  | { kind: 'order'; slotId: number; unitIds: number[]; order: { type: OrderType; x: number; z: number; cpId?: number; radius?: number; followId?: number } }
   | { kind: 'buy'; slotId: number; unitType: UnitTypeId }
   | { kind: 'possess'; slotId: number; unitId: number } // -1 releases
   | { kind: 'input'; slotId: number; input: ControlInput }
   | { kind: 'begin' };
 
-export type Composition = Record<UnitTypeId, number>;
+export type Composition = Record<'infantry' | 'heavy' | 'scout' | 'ranged', number> & Partial<Record<'tank' | 'vehicle', number>>;
+

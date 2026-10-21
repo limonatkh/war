@@ -47,6 +47,7 @@ export interface UnitModel {
 }
 
 export function createUnitModel(type: UnitTypeId, team: Team): UnitModel {
+  if (UNIT_DEFS[type].vehicle) return createVehicleModel(type, team);
   const def = UNIT_DEFS[type];
   const root = new THREE.Group();
   const body = new THREE.Group();
@@ -142,9 +143,50 @@ export function createUnitModel(type: UnitTypeId, team: Team): UnitModel {
   return { root, body, legL, legR, armL, armR, gun, flash, ring, selRing, marker, bar, barFg, scale: s };
 }
 
+function createVehicleModel(type: UnitTypeId, team: Team): UnitModel {
+  const model = createUnitModel('infantry', team);
+  const { body } = model;
+  body.clear();
+  const tank = type === 'tank';
+  const color = TEAM_MAIN[team], dark = TEAM_DARK[team];
+  part(body, 1.0, 0.42, 1.5, 0, 0.53, 0, color);
+  part(body, 0.92, 0.15, 1.35, 0, 0.82, 0, dark);
+  if (tank) {
+    for (const x of [-0.59, 0.59]) {
+      part(body, 0.27, 0.42, 1.75, x, 0.3, 0, '#252b32');
+      for (let z = -0.7; z <= 0.7; z += 0.28) part(body, 0.29, 0.07, 0.08, x, 0.51, z, '#69727c');
+    }
+  } else {
+    for (const x of [-0.55, 0.55]) for (const z of [-0.5, 0.5]) {
+      part(body, 0.24, 0.45, 0.42, x, 0.28, z, '#20252d');
+      part(body, 0.26, 0.17, 0.18, x, 0.28, z, '#8c98a2');
+    }
+    part(body, 0.76, 0.36, 0.6, 0, 1.03, -0.2, dark);
+    part(body, 0.67, 0.2, 0.04, 0, 1.07, -0.51, '#b3dfec');
+  }
+  const turret = new THREE.Group(); turret.position.set(0, 1.1, 0);
+  part(turret, tank ? 0.73 : 0.45, 0.37, 0.7, 0, 0, 0, color);
+  part(turret, tank ? 0.15 : 0.09, tank ? 0.15 : 0.09, 1.1, 0, 0.05, -0.78, '#394550');
+  body.add(turret);
+  model.gun = turret;
+  model.flash.position.set(0, 1.15, -1.36); body.add(model.flash);
+  const s = UNIT_DEFS[type].scale;
+  model.scale = s; body.scale.setScalar(s); model.ring.scale.setScalar(s); model.selRing.scale.setScalar(s);
+  model.bar.position.y = 2.4 * s;
+  return model;
+}
+
 /** Viewmodel gun shown in first person, parented to the camera. */
 export function createViewModel(type: UnitTypeId): { group: THREE.Group; flash: THREE.Mesh } {
   const g = new THREE.Group();
+  if (UNIT_DEFS[type].vehicle) {
+    part(g, 1.3, 0.22, 0.35, -0.26, -0.2, -0.1, '#263441');
+    part(g, type === 'tank' ? 0.19 : 0.1, 0.16, 1.25, -0.26, 0.05, -0.65, '#536678');
+    const flash = new THREE.Mesh(geo.box, new THREE.MeshBasicMaterial({ color: '#ffe07a' }));
+    flash.scale.set(0.3, 0.3, 0.35); flash.position.set(-0.26, 0.05, -1.3); flash.visible = false; g.add(flash);
+    g.position.set(0.26, -0.24, -0.5);
+    return { group: g, flash };
+  }
   const len = type === 'ranged' ? 0.95 : type === 'heavy' ? 0.7 : type === 'scout' ? 0.45 : 0.6;
   const matDark = lam('#2b2f3a');
   const barrel = new THREE.Mesh(geo.box, matDark); barrel.scale.set(0.09, 0.1, len); barrel.position.set(0, 0, -len / 2);
@@ -160,3 +202,4 @@ export function createViewModel(type: UnitTypeId): { group: THREE.Group; flash: 
   g.traverse((o) => { o.renderOrder = 20; const m = (o as THREE.Mesh).material as THREE.Material | undefined; if (m) m.depthTest = true; });
   return { group: g, flash };
 }
+

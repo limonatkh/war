@@ -10,7 +10,7 @@ import { showResult } from './ui/result';
 
 const ui = document.getElementById('ui') as HTMLElement;
 
-const ORDER_LABEL: Record<OrderType, string> = { move: 'Move', attack: 'Attack', defend: 'Defend', hold: 'Hold position', retreat: 'Retreat', capture: 'Capture' };
+const ORDER_LABEL: Record<OrderType, string> = { move: 'Move', attack: 'Attack', defend: 'Defend', hold: 'Hold position', retreat: 'Retreat', capture: 'Capture', follow: 'Follow me' };
 
 class App {
   private audio = new GameAudio();
@@ -43,6 +43,15 @@ class App {
   private selection = new Set<number>();
   private drag: { x: number; y: number; active: boolean } | null = null;
   private pendingFpp = -1;
+  private lastControlled = -1;
+  private squads: number[][] = [[], [], []];
+  private activeSquad = 0;
+  private qStarted = 0;
+  private wheelOpen = false;
+  private wheelIndex = 0;
+  private wheelX = 0;
+  private wheelY = 0;
+  private readonly fieldOrders: OrderType[] = ['follow', 'hold', 'move', 'attack', 'retreat'];
   private unlockExpected = false;
   private pauseEl: HTMLElement | null = null;
   private lastHqWarn = -99;
@@ -50,8 +59,8 @@ class App {
 
   constructor() {
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.mouseDown = false; });
+    window.addEventListener('keyup', (e) => this.onKeyUp(e));
+    window.addEventListener('blur', () => this.cancelFieldInput());
     window.addEventListener('resize', () => this.view?.resize());
     window.addEventListener('mousemove', (e) => this.onMouseMove(e));
     window.addEventListener('mouseup', (e) => this.onMouseUp(e));
@@ -99,13 +108,14 @@ class App {
     this.audio.unlock();
     this.choice = choice;
     this.humanTeam = choice.team;
-    this.role = choice.role;
+    this.role = 'commander';
     const seed = (Math.random() * 1e9) | 0;
     const aiComp: Composition = { ...PRESETS[seed % PRESETS.length].comp };
     const mine: Composition = choice.role === 'commander' && choice.battalion < 0 ? choice.composition : { ...PRESETS[0].comp };
     const comps: [Composition, Composition] = choice.team === 0 ? [mine, aiComp] : [aiComp, mine];
     this.battle = new Battle({
       seed, compositions: comps, humanTeam: choice.team, humanRole: choice.role, humanBattalion: choice.battalion,
+      mapId: choice.mapId, deathBehavior: choice.deathBehavior,
       soldierType: choice.soldierType, deploy: choice.role === 'commander', difficulty: choice.difficulty,
     });
     this.slotId = this.battle.humanSlotId;
@@ -114,7 +124,10 @@ class App {
     this.view = new GameView(this.canvas, this.battle, this.humanTeam);
     this.selection = new Set();
     this.view.selection = this.selection;
-    this.hud = new Hud(ui, this.battle, this.humanTeam, choice.role, {
+    this.hud = new Hud(ui, this.battle, this.humanTeam, this.role, {
+      fieldOrder: (t) => this.fieldOrder(t),
+      squad: (n) => this.selectSquad(n),
+      toggleView: () => this.toggleView(),
       order: (t) => this.orderButton(t),
       buy: (t) => this.buy(t),
       select: (k) => this.selectKind(k),
@@ -125,6 +138,9 @@ class App {
       pause: () => this.pause(!this.paused),
       focusMap: (x, z) => this.view.cmd.focus(x, z),
     });
+    this.lastControlled = -1; this.qStarted = 0; this.wheelOpen = false; this.activeSquad = 0;
+    this.squads = [0, 1, 2].map((bn) => this.battle.units.filter((u) => u.team === this.humanTeam && u.battalion === bn &&
+      (choice.battalion < 0 || u.battalion === choice.battalion)).map((u) => u.id));
     this.speed = 1; this.acc = 0; this.paused = false; this.armed = null; this.ended = false; this.endAt = -1;
     this.pendingFpp = -1; this.lastHqWarn = -99; this.keys.clear();
     this.running = true;
@@ -134,7 +150,7 @@ class App {
       const slot = this.battle.slots[this.slotId];
       this.enterFpp(slot.unitId);
       this.lockPointer();
-      this.hud.message(`You are a ${UNIT_DEFS[choice.soldierType].name} in the ${TEAM_NAME[choice.team]} Army. Follow your commander's orders.`, 'info');
+      this.hud.message('Field command: Q gives orders, hold Q for the command wheel. Tab opens strategy.', 'info');
     } else {
       this.hud.message('You are the Army Commander. Select units, give orders, then begin the battle.', 'info');
       this.hud.hint('Right-click: smart order · Z Move · X Attack · C Capture · V Defend · F take control of a soldier');
@@ -168,10 +184,10 @@ class App {
       speed: this.speed, fppUnitId: this.view.fppUnitId,
     }, dt);
 
-    const slot = b.slots[this.slotId];
-    if (this.role === 'soldier' && slot && slot.unitId < 0 && slot.respawnT > 0 && b.phase === 'running') {
-      this.hud.death(`You were killed — respawning in ${Math.ceil(slot.respawnT)}…`);
+    if (this.qStarted && !this.wheelOpen && t - this.qStarted > 220 && !this.paused) {
+      this.wheelOpen = true; this.wheelX = 0; this.wheelY = 0; this.wheelIndex = 0;
     }
+    this.hud.fieldState(this.activeSquad, this.squadIds(), this.wheelOpen ? this.wheelIndex : -1);
     if (this.endAt >= 0 && t >= this.endAt && !this.ended) {
       this.ended = true;
       this.exitLock();
@@ -203,11 +219,11 @@ class App {
     inp.moveR = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     inp.yaw = this.look.yaw;
     inp.pitch = this.look.pitch;
+    if (this.wheelOpen) return { ...emptyInput(), yaw: inp.yaw, pitch: inp.pitch };
     inp.fire = (this.mouseDown && document.pointerLockElement === this.canvas) || this.tFire;
     inp.jump = k.has('Space') || this.tJump;
     if (this.tMove.f || this.tMove.r) { inp.moveF = this.tMove.f; inp.moveR = this.tMove.r; }
-    if (this.tMove.sprint) inp.sprint = true;
-    inp.sprint = k.has('ShiftLeft') || k.has('ShiftRight');
+    inp.sprint = this.tMove.sprint || k.has('ShiftLeft') || k.has('ShiftRight');
     inp.reload = this.reloadQueued || k.has('KeyR');
     return inp;
   }
@@ -244,14 +260,15 @@ class App {
         case 'possessLost':
           if (e.slotId === this.slotId) {
             if (this.role === 'commander') {
-              this.hud.message('Your soldier was killed — back to command view.', 'bad');
+              this.hud.message('Unit lost — returned to strategy. No replacement was spawned.', 'bad');
               this.leaveFpp(false);
             }
           }
           break;
-        case 'respawn':
+        case 'controlTransferred':
           if (e.slotId === this.slotId) {
-            this.view.fppUnitId = e.unitId;
+            this.enterFpp(e.unitId);
+            this.hud.message('Unit lost — controlling a surviving soldier.', 'info');
             const u = b.unitById(e.unitId);
             if (u) { this.look.yaw = u.yaw; this.look.pitch = 0; this.view.look = this.look; }
             this.hud.death('');
@@ -275,6 +292,8 @@ class App {
     const u = this.battle.unitById(unitId);
     if (!u) return;
     this.pendingFpp = -1;
+    this.lastControlled = unitId;
+    this.cancelFieldInput();
     this.view.mode = 'fpp';
     this.view.fppUnitId = unitId;
     this.look.yaw = u.yaw; this.look.pitch = 0;
@@ -285,11 +304,13 @@ class App {
     this.hud.death('');
     this.hud.hint('');
     this.hud.banner('');
+    this.selectSquad(this.activeSquad, false);
   }
 
   private leaveFpp(release = true) {
     if (this.view.mode !== 'fpp') return;
     const u = this.battle.unitById(this.view.fppUnitId);
+    this.cancelFieldInput();
     if (release) this.battle.submit({ kind: 'possess', slotId: this.slotId, unitId: -1 });
     this.view.mode = 'commander';
     this.view.fppUnitId = -1;
@@ -303,12 +324,97 @@ class App {
   private possessSelected() {
     if (this.role !== 'commander' || this.view.mode !== 'commander') return;
     const b = this.battle;
+    if (b.phase !== 'running') { this.hud.message('Begin the battle first (Space).', 'info'); return; }
     const id = [...this.selection].find((i) => { const u = b.unitById(i); return u && u.alive && u.controller < 0; });
     if (id === undefined) { this.hud.message('Select a soldier first, then press F to take control.', 'info'); return; }
     b.submit({ kind: 'possess', slotId: this.slotId, unitId: id });
     this.pendingFpp = id;
     this.lockPointer();
-    if (b.phase === 'deploy') { this.hud.message('Begin the battle first (Space).', 'info'); this.pendingFpp = -1; this.exitLock(); }
+  }
+
+  private cancelFieldInput() {
+    this.keys.clear(); this.mouseDown = false; this.reloadQueued = false;
+    this.qStarted = 0; this.wheelOpen = false; this.tFire = false; this.tJump = false;
+    this.tMove = { f: 0, r: 0, sprint: false };
+  }
+
+  private toggleView() {
+    if (this.view.mode === 'fpp') { this.leaveFpp(); return; }
+    const u = this.battle.unitById(this.lastControlled);
+    if (u && this.isMine(u)) {
+      this.selection.clear(); this.selection.add(u.id);
+    }
+    this.possessSelected();
+  }
+
+  private squadIds() {
+    return this.squads[this.activeSquad].filter((id) => {
+      const u = this.battle.unitById(id); return u && this.isMine(u);
+    });
+  }
+
+  private selectSquad(n: number, announce = true) {
+    this.activeSquad = n;
+    this.selection.clear();
+    for (const id of this.squadIds()) this.selection.add(id);
+    if (announce) this.hud.message(`Squad ${n + 1}: ${this.selection.size} available units`, 'info');
+  }
+
+  private aimedUnit(friendly: boolean) {
+    const me = this.battle.unitById(this.view.fppUnitId);
+    if (!me) return undefined;
+    const dx = -Math.sin(this.look.yaw) * Math.cos(this.look.pitch);
+    const dy = Math.sin(this.look.pitch), dz = -Math.cos(this.look.yaw) * Math.cos(this.look.pitch);
+    const oy = me.y + 1.5 * UNIT_DEFS[me.type].scale;
+    const wall = this.battle.map.raycast(me.x, oy, me.z, dx, dy, dz, 60);
+    let best: typeof me | undefined, nearest = wall?.t ?? 60;
+    for (const u of this.battle.units) {
+      if (!u.alive || u.id === me.id || (u.team === me.team) !== friendly) continue;
+      if (friendly && !this.isMine(u)) continue;
+      const rx = u.x - me.x, ry = u.y + UNIT_DEFS[u.type].scale - oy, rz = u.z - me.z;
+      const t = rx * dx + ry * dy + rz * dz;
+      const miss = Math.hypot(rx - dx * t, ry - dy * t, rz - dz * t);
+      if (t > 0 && t < nearest && miss < 0.9 * UNIT_DEFS[u.type].scale) { best = u; nearest = t; }
+    }
+    return best;
+  }
+
+  private toggleAimedAlly() {
+    const u = this.aimedUnit(true);
+    if (!u) { this.hud.message('Aim at an available ally to add or remove it.', 'info'); return; }
+    const squad = this.squads[this.activeSquad], i = squad.indexOf(u.id);
+    if (i >= 0) squad.splice(i, 1);
+    else { for (const s of this.squads) { const at = s.indexOf(u.id); if (at >= 0) s.splice(at, 1); } squad.push(u.id); }
+    this.selectSquad(this.activeSquad);
+  }
+
+  private fieldOrder(type?: OrderType) {
+    if (this.paused || this.ended || this.view.mode !== 'fpp') return;
+    const me = this.battle.unitById(this.view.fppUnitId);
+    if (!me?.alive) return;
+    const ids = this.squadIds();
+    if (!ids.length) { this.hud.message('Squad empty — choose 1/2/3 or aim at an ally and press G.', 'info'); return; }
+    let x = me.x, z = me.z;
+    const foe = this.aimedUnit(false);
+    if (!type || type === 'move' || type === 'attack') {
+      const cp = Math.cos(this.look.pitch);
+      const dx = -Math.sin(this.look.yaw) * cp, dy = Math.sin(this.look.pitch), dz = -Math.cos(this.look.yaw) * cp;
+      const hit = this.battle.map.raycast(me.x, me.y + 1.5 * UNIT_DEFS[me.type].scale, me.z, dx, dy, dz, 80);
+      if (foe && type !== 'move') { x = foe.x; z = foe.z; type ??= 'attack'; }
+      else if (hit) { x = me.x + dx * hit.t; z = me.z + dz * hit.t; type ??= 'move'; }
+      else { this.hud.message('Aim at terrain or an enemy to place an order.', 'info'); return; }
+    }
+    this.battle.submit({ kind: 'order', slotId: this.slotId, unitIds: ids,
+      order: { type, x, z, followId: type === 'follow' ? me.id : undefined } });
+    this.audio.order();
+    this.hud.message(`Squad ${this.activeSquad + 1}: ${ORDER_LABEL[type]} — ${ids.length} units`, 'order');
+  }
+
+  private onKeyUp(e: KeyboardEvent) {
+    this.keys.delete(e.code);
+    if (e.code !== 'KeyQ' || !this.qStarted) return;
+    if (!this.paused && this.view.mode === 'fpp') this.fieldOrder(this.wheelOpen ? this.fieldOrders[this.wheelIndex] : undefined);
+    this.qStarted = 0; this.wheelOpen = false;
   }
 
   // ------------------------------------------------------------------ pointer lock / pause
@@ -334,7 +440,7 @@ class App {
     if (!this.running || this.ended || this.battle.phase === 'ended') return;
     if (on === this.paused) return;
     this.paused = on;
-    this.keys.clear(); this.mouseDown = false;
+    this.cancelFieldInput();
     this.pauseEl?.remove();
     this.pauseEl = null;
     if (!on) return;
@@ -343,10 +449,19 @@ class App {
     el.className = 'screen';
     el.innerHTML = `<div class="card pause-card"><h2>Paused</h2>
       <p class="hint">${this.view.mode === 'fpp' ? 'Click Resume to capture the mouse again.' : 'Press P to resume.'}</p>
+      <label class="death-setting">When my unit dies
+        <select id="deathSetting"><option value="nearest">Control nearest soldier</option><option value="farthest">Control farthest soldier</option><option value="commander">Return to strategy</option></select></label>
       <div class="row"><button class="primary" id="resume">Resume</button></div>
       <div class="row"><button id="restart">Restart</button><button id="menu">Main menu</button></div></div>`;
     ui.appendChild(el);
     this.pauseEl = el;
+    const deathSetting = el.querySelector<HTMLSelectElement>('#deathSetting')!;
+    deathSetting.value = this.choice.deathBehavior;
+    deathSetting.addEventListener('change', () => {
+      this.choice.deathBehavior = deathSetting.value as MenuChoice['deathBehavior'];
+      this.battle.slots[this.slotId].deathBehavior = this.choice.deathBehavior;
+      try { localStorage.setItem('war-death-behavior', this.choice.deathBehavior); } catch { /* optional persistence */ }
+    });
     el.querySelector('#resume')!.addEventListener('click', () => { this.pause(false); if (this.view.mode === 'fpp') this.lockPointer(); });
     el.querySelector('#restart')!.addEventListener('click', () => this.start(this.choice));
     el.querySelector('#menu')!.addEventListener('click', () => this.menu(this.choice));
@@ -566,13 +681,25 @@ class App {
     if (this.paused || this.ended) return;
 
     if (this.view.mode === 'fpp') {
-      if (e.code === 'Tab' && this.role === 'commander') this.leaveFpp();
+      if (e.code === 'Tab') this.toggleView();
+      else if (e.code === 'KeyQ') this.qStarted = performance.now();
+      else if (e.code === 'KeyG') this.toggleAimedAlly();
+      else if (/^Digit[123]$/.test(e.code)) this.selectSquad(Number(e.code.slice(-1)) - 1);
       else if (e.code === 'KeyR') this.reloadQueued = true;
       return;
     }
     // commander view
     const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && /^Digit[123]$/.test(e.code)) {
+      e.preventDefault(); const n = Number(e.code.slice(-1)) - 1;
+      const ids = this.ownIds();
+      for (let i = 0; i < 3; i++) this.squads[i] = this.squads[i].filter((id) => !ids.includes(id));
+      this.squads[n] = ids; this.selectSquad(n); return;
+    }
     switch (e.code) {
+      case 'Tab': this.toggleView(); break;
+      case 'Digit5': this.buy('tank'); break;
+      case 'Digit6': this.buy('vehicle'); break;
       case 'Space': this.begin(); break;
       case 'KeyA': if (ctrl) { e.preventDefault(); this.selectKind('all'); } break;
       case 'KeyZ': this.orderButton('move'); break;
@@ -611,6 +738,14 @@ class App {
     if (!this.running) return;
     if (this.view.mode === 'fpp') {
       if (document.pointerLockElement !== this.canvas) return;
+      if (this.wheelOpen) {
+        this.wheelX += e.movementX; this.wheelY += e.movementY;
+        if (Math.hypot(this.wheelX, this.wheelY) > 12) {
+          const angle = Math.atan2(this.wheelX, -this.wheelY);
+          this.wheelIndex = Math.round((angle + Math.PI * 2) / (Math.PI * 2 / 5)) % 5;
+        }
+        return;
+      }
       this.look.yaw -= e.movementX * 0.0022;
       this.look.pitch = Math.max(-1.45, Math.min(1.45, this.look.pitch - e.movementY * 0.0022));
       return;
@@ -659,3 +794,4 @@ class App {
 
 const app = new App();
 (window as unknown as { __war: App }).__war = app;
+

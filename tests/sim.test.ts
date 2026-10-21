@@ -19,7 +19,7 @@ const manual = () => {
 /** Adds a slot (id === index) whose controlled unit just stands still: a frozen dummy. */
 const freeze = (b: Battle, u: { controller: number; stats: object; team: 0 | 1 }) => {
   const id = b.slots.length;
-  b.slots.push({ id, team: u.team, role: 'soldier', human: false, name: 'dummy', unitId: -1, respawnT: 0, soldierType: 'infantry', stats: { kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, damage: 0 }, battalion: -1 });
+  b.slots.push({ id, team: u.team, role: 'soldier', human: false, name: 'dummy', unitId: -1, soldierType: 'infantry', stats: { kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, damage: 0 }, battalion: -1 });
   u.controller = id;
 };
 const killAll = (b: Battle, team: 0 | 1) => { for (const u of b.units) if (u.team === team) { u.alive = false; u.hp = 0; } };
@@ -229,15 +229,18 @@ describe('first-person control', () => {
     expect(me.z).toBeGreaterThan(59.9); // HQ occupies z 56..59, so we stop at its edge
   });
 
-  it('a dead soldier respawns', () => {
+  it('a dead soldier transfers to an existing survivor without spawning', () => {
     const b = new Battle({ humanTeam: BLUE, humanRole: 'soldier', seed: 3 });
     const slot = b.slots.find((s) => s.human)!;
     const me = b.unitById(slot.unitId)!;
     me.hp = 1;
+    const spawned = b.teams[BLUE].spawned;
+    const existing = b.units.map((u) => u.id);
     const foe = b.units.find((u) => u.team === RED)!;
     (b as unknown as { damageUnit: (...a: unknown[]) => void }).damageUnit(me, 50, foe, false, 0, 0, 0);
-    expect(slot.unitId).toBe(-1);
-    run(b, 6);
+    expect(existing.includes(slot.unitId)).toBe(true);
+    expect(slot.unitId).not.toBe(me.id);
+    expect(b.teams[BLUE].spawned).toBe(spawned);
     expect(slot.unitId).toBeGreaterThan(0);
     expect(b.unitById(slot.unitId)!.alive).toBe(true);
   });
@@ -322,6 +325,11 @@ describe('battalion AI and human battalion commander', () => {
     const scouts = b.alive(0).filter((u) => u.battalion === 2);
     expect(scouts.length).toBeGreaterThan(0);
     expect(scouts.every((u) => u.order === null)).toBe(true); // nobody orders the human's battalion
-    expect(b.alive(0).filter((u) => u.battalion !== 2 && u.order).length).toBeGreaterThan(5); // allied AI battalions move
+    // Both AI battalions issue their own orders, independent of army composition.
+    for (const n of [0, 1]) {
+      const aiSlot = b.slots.find((s) => s.team === BLUE && s.battalion === n)!;
+      expect(b.alive(BLUE).some((u) => u.battalion === n && u.order?.issuer === aiSlot.id)).toBe(true);
+    }
   }, 60000);
 });
+

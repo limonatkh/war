@@ -21,6 +21,8 @@ const EYE = 1.5;
 
 export interface BattleConfig {
   seed?: number;
+  mapId?: import('./types').MapId;
+  deathBehavior?: import('./types').DeathBehavior;
   compositions?: [Composition, Composition];
   /** Team of the human player, or -1 for an all-AI (headless) battle. */
   humanTeam?: Team | -1;
@@ -36,7 +38,7 @@ export interface BattleConfig {
   difficulty?: 'easy' | 'normal' | 'hard';
 }
 
-const BATTALION_OF: Record<UnitTypeId, number> = { infantry: 0, heavy: 1, ranged: 1, scout: 2 };
+const BATTALION_OF: Record<UnitTypeId, number> = { infantry: 0, heavy: 1, ranged: 1, scout: 2, tank: 1, vehicle: 2 };
 
 const newStats = (): UnitStats => ({ kills: 0, deaths: 0, shots: 0, hits: 0, headshots: 0, damage: 0 });
 
@@ -48,7 +50,7 @@ interface ShotResult {
 }
 
 export class Battle {
-  readonly map = new GameMap();
+  readonly map: GameMap;
   readonly units: Unit[] = [];
   readonly structures: [Structure, Structure];
   readonly cps: ControlPoint[];
@@ -69,10 +71,11 @@ export class Battle {
   private ais: CommanderAI[] = [];
 
   constructor(cfg: BattleConfig = {}) {
+    this.map = new GameMap(cfg.mapId);
     this.rand = rng(cfg.seed ?? 1);
     this.humanTeam = cfg.humanTeam ?? -1;
     const comps = cfg.compositions ?? [DEFAULT_COMPOSITION, DEFAULT_COMPOSITION];
-    const humanRole = cfg.humanRole ?? 'commander';
+    const humanRole: SlotRole = 'commander';
     const humanBn = humanRole === 'commander' ? (cfg.humanBattalion ?? -1) : -1;
 
     this.structures = [
@@ -91,21 +94,14 @@ export class Battle {
       const human = this.humanTeam === team && humanRole === 'commander' && humanBn < 0;
       this.slots.push({
         id: team, team, role: 'commander', human, name: human ? 'You' : 'AI Commander',
-        unitId: -1, respawnT: 0, soldierType: 'infantry', stats: newStats(), battalion: -1,
+        unitId: -1, soldierType: 'infantry', stats: newStats(), battalion: -1,
       });
       if (!human) this.ais.push(new CommanderAI(team, this.rand() * 1000, this.humanTeam !== -1 && team !== this.humanTeam ? ({ easy: 2, normal: 1, hard: 0.6 })[cfg.difficulty ?? 'normal'] : 1));
     }
-    if (this.humanTeam !== -1 && humanRole === 'soldier') {
-      this.humanSlotId = 2;
-      this.slots.push({
-        id: 2, team: this.humanTeam, role: 'soldier', human: true, name: 'You',
-        unitId: -1, respawnT: 0, soldierType: cfg.soldierType ?? 'infantry', stats: newStats(), battalion: -1,
-      });
-    } else if (this.humanTeam !== -1 && humanBn >= 0) {
+    if (this.humanTeam !== -1 && humanBn >= 0) {
       this.humanSlotId = this.addBattalionCommander(this.humanTeam, humanBn, true);
-    } else if (this.humanTeam !== -1) {
-      this.humanSlotId = this.humanTeam;
-    }
+    } else if (this.humanTeam !== -1) this.humanSlotId = this.humanTeam;
+    if (this.humanSlotId >= 0) this.slots[this.humanSlotId].deathBehavior = cfg.deathBehavior ?? 'nearest';
 
     // Battalion AIs: the army AI then only buys, and each battalion is run by its own AI commander.
     for (const team of [BLUE, RED] as Team[]) {
@@ -125,11 +121,12 @@ export class Battle {
     // Initial deployment
     for (const team of [BLUE, RED] as Team[]) {
       const comp = comps[team];
-      const order: UnitTypeId[] = ['heavy', 'infantry', 'ranged', 'scout'];
+      const order: UnitTypeId[] = ['tank', 'vehicle', 'heavy', 'infantry', 'ranged', 'scout'];
       for (const type of order) for (let i = 0; i < (comp[type] ?? 0); i++) this.spawnUnit(team, type, true);
     }
     // Human soldier takes control of a unit of the chosen type
-    const soldier = this.slots.find((s) => s.role === 'soldier' && s.human);
+    const soldier = cfg.humanRole === 'soldier' ? this.slots[this.humanSlotId] : undefined;
+    if (soldier) soldier.soldierType = cfg.soldierType ?? 'infantry';
     if (soldier) {
       const pick = this.units.find((u) => u.team === soldier.team && u.type === soldier.soldierType && u.controller < 0)
         ?? this.units.find((u) => u.team === soldier.team && u.controller < 0);
@@ -161,7 +158,7 @@ export class Battle {
     this.separate();
     this.updatePoints(dt);
     this.updateEconomy(dt);
-    this.updateRespawns(dt);
+
     if (this.tickCount % 6 === 0) this.recomputeVisibility();
     this.checkVictory();
   }
@@ -177,7 +174,7 @@ export class Battle {
     const id = this.slots.length;
     this.slots.push({
       id, team, role: 'commander', human, name: `${BATTALION_NAMES[battalion] ?? 'Battalion'} Commander`,
-      unitId: -1, respawnT: 0, soldierType: 'infantry', stats: newStats(), battalion,
+      unitId: -1, soldierType: 'infantry', stats: newStats(), battalion,
     });
     return id;
   }
@@ -198,6 +195,10 @@ export class Battle {
     let spot = spots[0];
     for (const s of spots) {
       if (!this.units.some((o) => o.alive && Math.hypot(o.x - s.x, o.z - s.z) < 0.9)) { spot = s; break; }
+    }
+    if (def.vehicle) {
+      const [x, z] = this.map.nearestWalkable(Math.floor(spot.x), Math.floor(spot.z), 1);
+      spot = { x: x + 0.5, z: z + 0.5 };
     }
     if (!free) { ts.supplies -= def.cost; ts.suppliesSpent += def.cost; }
     ts.spawned++;
@@ -270,14 +271,16 @@ export class Battle {
     this.cmds.length = 0;
   }
 
-  issueOrder(slotId: number, unitIds: number[], o: { type: OrderType; x: number; z: number; cpId?: number; radius?: number }) {
+  issueOrder(slotId: number, unitIds: number[], o: { type: OrderType; x: number; z: number; cpId?: number; radius?: number; followId?: number }) {
     const slot = this.slots[slotId];
     if (!slot || slot.role !== 'commander') return;
-    const defaults: Record<OrderType, number> = { move: 2.5, attack: 4, defend: 7, hold: 0, retreat: 6, capture: 0 };
+    const defaults: Record<OrderType, number> = { move: 2.5, attack: 4, defend: 7, hold: 0, retreat: 6, capture: 0, follow: 3 };
+    const leader = o.type === 'follow' ? this.unitById(o.followId ?? -1) : undefined;
+    if (o.type === 'follow' && (!leader?.alive || leader.team !== slot.team || leader.controller !== slot.id)) return;
     const applied: number[] = [];
     for (const id of unitIds) {
       const u = this.unitById(id);
-      if (!u || !u.alive || u.team !== slot.team) continue;
+      if (!u || !u.alive || u.team !== slot.team || u.controller >= 0 || u.id === leader?.id) continue;
       if (slot.battalion >= 0 && u.battalion !== slot.battalion) continue; // battalion commanders only command their own battalion
       let radius = o.radius ?? defaults[o.type];
       let x = o.x, z = o.z;
@@ -296,7 +299,7 @@ export class Battle {
         const [wx, wz] = this.map.nearestWalkable(Math.floor(x), Math.floor(z));
         x = wx + 0.5; z = wz + 0.5;
       }
-      u.order = { type: o.type, x, z, radius, cpId: o.cpId ?? -1, issuer: slotId, issuedAt: this.time };
+      u.order = { followId: leader?.id, type: o.type, x, z, radius, cpId: o.cpId ?? -1, issuer: slotId, issuedAt: this.time };
       // personal offset so units spread inside the radius instead of stacking on one cell
       const a = u.id * 2.399963; // golden angle
       const r = Math.sqrt(((u.id * 0.618034) % 1)) * radius * 0.8;
@@ -355,14 +358,14 @@ export class Battle {
     const inp = u.input;
     u.yaw = inp.yaw;
     u.pitch = inp.pitch;
-    const sprint = inp.sprint && inp.moveF > 0.1;
+    const sprint = !def.vehicle && inp.sprint && inp.moveF > 0.1;
     const speed = def.speed * (sprint ? 1.4 : 1);
     let wx = -Math.sin(inp.yaw) * inp.moveF + Math.cos(inp.yaw) * inp.moveR;
     let wz = -Math.cos(inp.yaw) * inp.moveF - Math.sin(inp.yaw) * inp.moveR;
     const len = Math.hypot(wx, wz);
     if (len > 1) { wx /= len; wz /= len; }
     u.moving = len > 0.05;
-    const r = 0.3 * def.scale;
+    const r = (def.vehicle ? 0.65 : 0.3) * def.scale;
     const nx = u.x + wx * speed * dt;
     if (this.footprintTops(nx, u.z, r) <= u.y + STEP_UP) u.x = nx;
     const nz = u.z + wz * speed * dt;
@@ -372,7 +375,7 @@ export class Battle {
 
     const ground = this.footprintTops(u.x, u.z, r);
     if (u.grounded) {
-      if (inp.jump) { u.vy = JUMP_SPEED; u.grounded = false; }
+      if (inp.jump && !def.vehicle) { u.vy = JUMP_SPEED; u.grounded = false; }
       else if (ground >= u.y - 0.05) u.y = ground;
       else { u.grounded = false; u.vy = 0; }
     }
@@ -465,6 +468,14 @@ export class Battle {
 
     if (o) {
       switch (o.type) {
+        case 'follow': {
+          const leader = this.unitById(o.followId ?? -1);
+          if (!leader?.alive) { u.order = { ...o, type: 'hold', x: u.x, z: u.z }; break; }
+          o.x = leader.x; o.z = leader.z;
+          gx = leader.x + u.offX; gz = leader.z + u.offZ;
+          wantMove = Math.hypot(gx - u.x, gz - u.z) > 2.2;
+          break;
+        }
         case 'hold':
           stopToFight = true;
           break;
@@ -492,7 +503,7 @@ export class Battle {
     }
 
     // Under fire and cover is nearby: duck behind it for a moment
-    if (o && o.type !== 'move' && o.type !== 'retreat' && u.coverT <= 0 && u.coverCd <= 0 &&
+    if (o && !def.vehicle && o.type !== 'follow' && o.type !== 'move' && o.type !== 'retreat' && u.coverT <= 0 && u.coverCd <= 0 &&
         this.time - u.lastDamagedAt < 1.2 && u.hp < u.maxHp * 0.8) {
       const th = this.threatDir(u);
       const c = th ? this.findCover(u, th.x, th.z) : null;
@@ -575,15 +586,17 @@ export class Battle {
 
   /** Walks one step along the shared flow field. Returns true when the goal has been reached. */
   private moveToward(u: Unit, gx: number, gz: number, speed: number, dt: number, aimAt: { x: number; z: number } | null): boolean {
+    const clearance = UNIT_DEFS[u.type].vehicle ? 1 : 0;
+    if (clearance) { const [x, z] = this.map.nearestWalkable(Math.floor(gx), Math.floor(gz), clearance); gx = x + 0.5; gz = z + 0.5; }
     const dist = Math.hypot(gx - u.x, gz - u.z);
     if (dist < 0.45) return true;
     let cx = Math.floor(u.x), cz = Math.floor(u.z);
     if (!this.map.walkable(cx, cz)) { [cx, cz] = this.map.nearestWalkable(cx, cz); }
-    const field = this.map.field(Math.floor(gx), Math.floor(gz));
-    const goalCell = this.map.nearestWalkable(Math.floor(gx), Math.floor(gz));
+    const field = this.map.field(Math.floor(gx), Math.floor(gz), clearance);
+    const goalCell = this.map.nearestWalkable(Math.floor(gx), Math.floor(gz), clearance);
     let tx = gx, tz = gz;
     if (!(cx === goalCell[0] && cz === goalCell[1])) {
-      const next = this.map.nextCell(field, cx, cz);
+      const next = this.map.nextCell(field, cx, cz, clearance);
       if (!next) return false;
       tx = next[0] + 0.5; tz = next[1] + 0.5;
     }
@@ -636,6 +649,7 @@ export class Battle {
     const cx = Math.floor(u.x), cz = Math.floor(u.z);
     const nx = u.x + dx, nz = u.z + dz;
     const ncx = Math.floor(nx), ncz = Math.floor(nz);
+    if (UNIT_DEFS[u.type].vehicle && !this.map.walkable(ncx, ncz, 1)) return;
     if ((ncx === cx && ncz === cz) || this.map.canStep(cx, cz, ncx, ncz)) {
       if (ncx !== cx && ncz !== cz && !(this.map.canStep(cx, cz, ncx, cz) && this.map.canStep(cx, cz, cx, ncz))) return;
       u.x = nx; u.z = nz;
@@ -698,7 +712,7 @@ export class Battle {
     for (const e of this.units) {
       if (!e.alive || e.team === shooter.team || a < 1e-8) continue;
       const def = UNIT_DEFS[e.type];
-      const r = 0.42 * def.scale, height = 1.75 * def.scale;
+      const r = (def.vehicle ? 0.65 : 0.42) * def.scale, height = 1.75 * def.scale;
       const rx = ox - e.x, rz = oz - e.z;
       const b = rx * dx + rz * dz;
       const c = rx * rx + rz * rz - r * r;
@@ -709,13 +723,14 @@ export class Battle {
       if (t < 0 || t > best.t) continue;
       const y = oy + dy * t;
       if (y < e.y || y > e.y + height) continue;
-      best = { kind: 'unit', t, unit: e, head: y > e.y + height * 0.78 };
+      best = { kind: 'unit', t, unit: e, head: !def.vehicle && y > e.y + height * 0.78 };
     }
     return best;
   }
 
   private damageUnit(target: Unit, amount: number, attacker: Unit, head: boolean, x: number, y: number, z: number) {
     if (!target.alive) return;
+    if (UNIT_DEFS[target.type].vehicle && attacker.type !== 'tank') amount *= 0.6;
     const dealt = Math.min(amount, target.hp);
     target.hp -= amount;
     target.lastDamagedAt = this.time;
@@ -738,8 +753,8 @@ export class Battle {
         slot.stats.deaths++;
         slot.unitId = -1;
         target.controller = -1;
-        if (slot.role === 'soldier') slot.respawnT = 5;
-        this.events.push({ t: 'possessLost', slotId: slot.id });
+        this.transferAfterDeath(slot, target);
+
       }
     }
   }
@@ -780,19 +795,18 @@ export class Battle {
     this.teams[1].supplies += 0.35 * dt;
   }
 
-  private updateRespawns(dt: number) {
-    for (const slot of this.slots) {
-      if (slot.role !== 'soldier' || slot.unitId >= 0 || slot.respawnT <= 0) continue;
-      slot.respawnT -= dt;
-      if (slot.respawnT <= 0) {
-        slot.respawnT = 0;
-        const u = this.spawnUnit(slot.team, slot.soldierType, true);
-        if (u) {
-          this.possess(slot, u);
-          this.events.push({ t: 'respawn', slotId: slot.id, unitId: u.id });
-        }
-      }
-    }
+  private transferAfterDeath(slot: PlayerSlot, dead: Unit) {
+    const mode = slot.deathBehavior ?? 'commander';
+    const candidates = this.units.filter((u) => u.alive && u.team === slot.team && u.controller < 0 &&
+      !UNIT_DEFS[u.type].vehicle && (slot.battalion < 0 || slot.battalion === u.battalion));
+    candidates.sort((a, b) => {
+      const d = Math.hypot(a.x - dead.x, a.z - dead.z) - Math.hypot(b.x - dead.x, b.z - dead.z);
+      return (mode === 'farthest' ? -d : d) || a.id - b.id;
+    });
+    if (mode !== 'commander' && candidates.length) {
+      this.possess(slot, candidates[0]);
+      this.events.push({ t: 'controlTransferred', slotId: slot.id, unitId: candidates[0].id });
+    } else this.events.push({ t: 'possessLost', slotId: slot.id });
   }
 
   recomputeVisibility() {
@@ -831,8 +845,7 @@ export class Battle {
     }
     const minCost = Math.min(...Object.values(UNIT_DEFS).map((d) => d.cost));
     for (const team of [BLUE, RED] as Team[]) {
-      const soldierPending = this.slots.some((s) => s.team === team && s.role === 'soldier' && s.respawnT > 0);
-      if (this.alive(team).length === 0 && this.teams[team].supplies < minCost && !soldierPending) {
+      if (this.alive(team).length === 0 && this.teams[team].supplies < minCost) {
         return this.end(enemyOf(team), `${team === BLUE ? 'Blue' : 'Red'} army wiped out`);
       }
     }
@@ -852,3 +865,4 @@ export class Battle {
 
   currentOrder(u: Unit): Order | null { return u.order; }
 }
+

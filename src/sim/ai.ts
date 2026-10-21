@@ -83,7 +83,7 @@ export class CommanderAI {
 
     const free = mine.filter((u) => !plans.has(u.id));
     const scouts = free.filter((u) => u.type === 'scout');
-    const main = free.filter((u) => u.type === 'infantry' || u.type === 'heavy');
+    const main = free.filter((u) => u.type === 'infantry' || u.type === 'heavy' || u.type === 'tank' || u.type === 'vehicle');
     const ranged = free.filter((u) => u.type === 'ranged');
 
     // ---- choose targets
@@ -159,10 +159,11 @@ export class CommanderAI {
   private buy(b: Battle) {
     const team = this.team;
     if (b.alive(team).length >= MAX_UNITS) return;
-    const cycle: UnitTypeId[] = ['infantry', 'infantry', 'heavy', 'ranged', 'infantry', 'scout'];
+    const cycle: UnitTypeId[] = ['infantry', 'tank', 'heavy', 'ranged', 'vehicle', 'scout'];
     const type = cycle[this.buyCycle % cycle.length];
     if (b.teams[team].supplies < UNIT_DEFS[type].cost) return;
     this.buyCycle++;
     b.submit({ kind: 'buy', slotId: team, unitType: type });
   }
 }
+

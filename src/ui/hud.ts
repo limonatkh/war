@@ -6,6 +6,9 @@ import { BATTALION_NAMES, UNIT_TYPE_IDS, type OrderType, type SlotRole, type Tea
 import { ORDER_COLORS, type GameView, type ViewMode } from '../render/view';
 
 export interface HudHandlers {
+  fieldOrder(type: OrderType): void;
+  squad(n: number): void;
+  toggleView(): void;
   order(type: OrderType): void;
   buy(t: UnitTypeId): void;
   select(kind: 'all' | UnitTypeId): void;
@@ -91,6 +94,13 @@ export class Hud {
       <div class="minimap"><canvas id="mini" width="190" height="190"></canvas></div>
 
       <div class="fpp-only">
+        <div class="field-panel">
+          <b id="squadStatus"></b>
+          <div class="field-squads">${[0, 1, 2].map((n) => `<button data-squad="${n}">Squad ${n + 1}</button>`).join('')}<button id="fieldBack">Strategy · Tab</button></div>
+          <div class="field-touch-orders">${(['follow', 'hold', 'move', 'attack', 'retreat'] as const).map((t) => `<button data-field="${t}">${t === 'follow' ? 'Follow me' : t}</button>`).join('')}</div>
+          <small>Q: quick order · hold Q: command wheel · G: add/remove ally</small>
+        </div>
+        <div class="command-wheel" id="commandWheel" hidden>${['Follow me', 'Hold position', 'Move here', 'Attack here', 'Retreat'].map((t, i) => `<div data-wheel="${i}" style="--angle:${i * 72}deg"><span>${t}</span></div>`).join('')}<b>Release Q<br/>to confirm</b></div>
         <div class="crosshair"><i></i><i></i><i></i><i></i></div>
         <div class="hitmarker" id="hitmarker"></div>
         <div class="vignette" id="vignette"></div>
@@ -115,6 +125,9 @@ export class Hud {
     this.el.querySelectorAll<HTMLElement>('[data-bn]').forEach((b) => b.addEventListener('click', () => h.selectBattalion(Number(b.dataset.bn))));
     this.el.querySelectorAll<HTMLElement>('[data-sel]').forEach((b) => b.addEventListener('click', () => h.select(b.dataset.sel as 'all' | UnitTypeId)));
     this.el.querySelectorAll<HTMLElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => h.speed(Number(b.dataset.speed))));
+    this.el.querySelectorAll<HTMLElement>('[data-field]').forEach((b) => b.addEventListener('click', () => h.fieldOrder(b.dataset.field as OrderType)));
+    this.el.querySelectorAll<HTMLElement>('[data-squad]').forEach((b) => b.addEventListener('click', () => h.squad(Number(b.dataset.squad))));
+    this.q('#fieldBack').addEventListener('click', () => h.toggleView());
     this.q('#enter').addEventListener('click', () => h.possess());
     this.q('#beginBtn').addEventListener('click', () => h.begin());
     this.q('#pauseBtn').addEventListener('click', () => h.pause());
@@ -138,6 +151,16 @@ export class Hud {
     this.el.classList.toggle('mode-fpp', mode === 'fpp');
     this.el.classList.toggle('mode-cmd', mode === 'commander');
     this.q('#fppHint').textContent = this.role === 'commander' ? 'TAB: back to command view' : '';
+  }
+
+  fieldState(squad: number, ids: number[], wheel: number) {
+    const units = ids.map((id) => this.battle.unitById(id)!);
+    const moving = units.filter((u) => u.moving).length;
+    const following = units.filter((u) => u.order?.type === 'follow').length;
+    this.q('#squadStatus').textContent = `Squad ${squad + 1} · ${ids.length} available · ${following} following · ${moving} moving`;
+    this.q('#commandWheel').hidden = wheel < 0;
+    this.el.querySelectorAll<HTMLElement>('[data-wheel]').forEach((e) => e.classList.toggle('on', Number(e.dataset.wheel) === wheel));
+    this.el.querySelectorAll<HTMLElement>('[data-squad]').forEach((e) => e.classList.toggle('on', Number(e.dataset.squad) === squad));
   }
 
   get selBox() { return this.q('#selbox'); }
@@ -324,3 +347,4 @@ export class Hud {
     }
   }
 }
+
